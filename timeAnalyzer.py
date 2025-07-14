@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
@@ -331,11 +330,10 @@ class TimeStudyAnalyzer:
         # Configurar grid
         analysis_frame.grid_rowconfigure(1, weight=1)
         analysis_frame.grid_columnconfigure(0, weight=1)
-        analysis_frame.grid_columnconfigure(1, weight=1)
         
         # Frame do cabeçalho para título e botão
         header_frame = ttk.Frame(analysis_frame)
-        header_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
         header_frame.grid_columnconfigure(0, weight=1)  # Coluna do título expande
         
         # Título
@@ -347,12 +345,12 @@ class TimeStudyAnalyzer:
         analyze_btn.grid(row=0, column=1, sticky="e")
         
         # Frame esquerdo - Tabela de resultados
-        left_frame = ttk.LabelFrame(analysis_frame, text="Resultados Estatísticos")
-        left_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 5), pady=5)
-        left_frame.grid_rowconfigure(0, weight=1)
-        left_frame.grid_columnconfigure(0, weight=1)
+        table_frame = ttk.LabelFrame(analysis_frame, text="Resultados Estatísticos")
+        table_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
         
-        self.results_tree = ttk.Treeview(left_frame, columns=("Q1", "Mediana", "Q3", "IQR", "Média", "Outliers"), show="tree headings")
+        self.results_tree = ttk.Treeview(table_frame, columns=("Q1", "Mediana", "Q3", "IQR", "Média", "Outliers"), show="tree headings")
         self.results_tree.heading("#0", text="Atividade/Grupo")
         self.results_tree.heading("Q1", text="Q1")
         self.results_tree.heading("Mediana", text="Mediana")
@@ -363,27 +361,15 @@ class TimeStudyAnalyzer:
         self.results_tree.grid(row=0, column=0, sticky="nsew")
         
         # Scrollbar Vertical
-        results_v_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=self.results_tree.yview)
+        results_v_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.results_tree.yview)
         results_v_scroll.grid(row=0, column=1, sticky="ns")
         self.results_tree.configure(yscrollcommand=results_v_scroll.set)
         
         # Scrollbar Horizontal
-        results_h_scroll = ttk.Scrollbar(left_frame, orient="horizontal", command=self.results_tree.xview)
+        results_h_scroll = ttk.Scrollbar(table_frame, orient="horizontal", command=self.results_tree.xview)
         results_h_scroll.grid(row=1, column=0, sticky="ew")
         self.results_tree.configure(xscrollcommand=results_h_scroll.set)
-        
-        # Frame direito - Gráficos
-        right_frame = ttk.LabelFrame(analysis_frame, text="Visualizações")
-        right_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 10), pady=5)
-        right_frame.grid_rowconfigure(0, weight=1)
-        right_frame.grid_columnconfigure(0, weight=1)
-        
-        # Frame para matplotlib
-        self.plot_frame = ttk.Frame(right_frame)
-        self.plot_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        self.plot_frame.grid_rowconfigure(0, weight=1)
-        self.plot_frame.grid_columnconfigure(0, weight=1)
-        
+
     def create_export_tab(self):
         """Aba de exportação"""
         export_frame = ttk.Frame(self.notebook)
@@ -688,7 +674,7 @@ class TimeStudyAnalyzer:
             for activity in sorted(unique_activities):
                 if activity not in grouped_activities:
                     self.available_listbox.insert(tk.END, activity)
-                
+                    
     def detect_similarities(self):
         """Detectar atividades similares"""
         if self.processed_data is None:
@@ -801,7 +787,7 @@ class TimeStudyAnalyzer:
                     
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao unificar atividades: {str(e)}")
-        
+    
     def skip_activities(self):
         """Pular atividades selecionadas"""
         selected_items = self.similarity_tree.selection()
@@ -843,7 +829,7 @@ class TimeStudyAnalyzer:
         colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6", "#F97316"]
         for i, color in enumerate(colors):
             btn = tk.Button(color_frame, bg=color, width=3, height=1,
-                          command=lambda c=color: color_var.set(c))
+                            command=lambda c=color: color_var.set(c))
             btn.grid(row=0, column=i, padx=2)
         
         def confirm_group():
@@ -944,7 +930,7 @@ class TimeStudyAnalyzer:
         for group_name, group_data in self.activity_groups.items():
             # Adicionar grupo principal
             group_item = self.group_tree.insert("", tk.END, text=f"📁 {group_name}", 
-                                              values=(), open=True)
+                                                values=(), open=True)
             
             # Adicionar atividades do grupo
             for activity in group_data['activities']:
@@ -1124,9 +1110,6 @@ class TimeStudyAnalyzer:
             for item in self.results_tree.get_children():
                 self.results_tree.item(item, open=True)
                 
-            # Criar gráfico
-            self.create_boxplot()
-            
             # Mostrar estatísticas gerais
             unique_activities = len(self.processed_data['Atividade'].unique())
             total_time = self.processed_data['Tempo'].sum()
@@ -1146,83 +1129,6 @@ class TimeStudyAnalyzer:
             error_details = traceback.format_exc()
             print(f"Erro detalhado na análise: {error_details}")
             messagebox.showerror("Erro", f"Erro na análise estatística:\n{str(e)}\n\nVerifique o console para mais detalhes.")
-            
-    def create_boxplot(self):
-        """Criar boxplot dos dados"""
-        try:
-            # Limpar frame anterior
-            for widget in self.plot_frame.winfo_children():
-                widget.destroy()
-                
-            # Verificar se há dados
-            if self.processed_data is None or len(self.processed_data) == 0:
-                # Mostrar mensagem de não há dados
-                no_data_label = ttk.Label(self.plot_frame, text="Nenhum dado disponível para visualização", 
-                                        font=("Arial", 12), foreground="gray")
-                no_data_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
-                return
-            
-            # Preparar dados para boxplot
-            activities = []
-            times_list = []
-            
-            grouped = self.processed_data.groupby('Atividade')['Tempo']
-            for activity, times in grouped:
-                if len(times) > 0:  # Só incluir atividades com dados
-                    activities.append(activity[:20] + "..." if len(activity) > 20 else activity)  # Truncar nomes longos
-                    times_list.append(times.values)
-            
-            if not times_list:
-                # Mostrar mensagem de não há dados válidos
-                no_data_label = ttk.Label(self.plot_frame, text="Nenhum dado válido para visualização", 
-                                        font=("Arial", 12), foreground="gray")
-                no_data_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
-                return
-            
-            # Criar figura com tamanho ajustado
-            fig, ax = plt.subplots(figsize=(10, 6))
-            fig.patch.set_facecolor('white')
-            
-            # Criar boxplot
-            bp = ax.boxplot(times_list, labels=activities, patch_artist=True)
-            
-            # Personalizar cores
-            colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 'lightpink', 'lightgray']
-            for patch, color in zip(bp['boxes'], colors * len(bp['boxes'])):
-                patch.set_facecolor(color)
-                patch.set_alpha(0.7)
-            
-            # Configurar gráfico
-            ax.set_title('Distribuição de Tempos por Atividade', fontsize=14, fontweight='bold')
-            ax.set_ylabel('Tempo (segundos)', fontsize=12)
-            ax.set_xlabel('Atividades', fontsize=12)
-            
-            # Rotacionar labels se necessário
-            if len(activities) > 5:
-                ax.tick_params(axis='x', rotation=45)
-            
-            # Adicionar grid
-            ax.grid(True, alpha=0.3)
-            
-            # Ajustar layout
-            plt.tight_layout()
-            
-            # Incorporar no tkinter
-            canvas = FigureCanvasTkAgg(fig, self.plot_frame)
-            canvas.draw()
-            canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
-            
-            print(f"Boxplot criado com sucesso para {len(activities)} atividades")
-            
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Erro detalhado ao criar gráfico: {error_details}")
-            
-            # Mostrar mensagem de erro no frame
-            error_label = ttk.Label(self.plot_frame, text=f"Erro ao criar gráfico:\n{str(e)}", 
-                                  font=("Arial", 10), foreground="red")
-            error_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
             
     def export_to_excel(self):
         """Exportar resultados para Excel"""
@@ -1294,14 +1200,14 @@ class TimeStudyAnalyzer:
                     
                     if activity_col in df.columns:
                         debug_info += f"• Coluna atividade '{activity_col}': {df[activity_col].count()} valores não-nulos\n"
-                        debug_info += f"  Exemplos: {list(df[activity_col].dropna().head(3))}\n"
+                        debug_info += f"   Exemplos: {list(df[activity_col].dropna().head(3))}\n"
                     else:
                         debug_info += f"• Coluna atividade '{activity_col}': NÃO ENCONTRADA\n"
                     
                     if time_col in df.columns:
                         debug_info += f"• Coluna tempo '{time_col}': {df[time_col].count()} valores não-nulos\n"
-                        debug_info += f"  Exemplos: {list(df[time_col].dropna().head(3))}\n"
-                        debug_info += f"  Tipos: {df[time_col].dtype}\n"
+                        debug_info += f"   Exemplos: {list(df[time_col].dropna().head(3))}\n"
+                        debug_info += f"   Tipos: {df[time_col].dtype}\n"
                         
                         # Detectar formato de tempo
                         sample_values = df[time_col].dropna().head(5)
@@ -1323,7 +1229,7 @@ class TimeStudyAnalyzer:
                                 except:
                                     time_formats.append("Texto")
                         
-                        debug_info += f"  Formatos detectados: {time_formats}\n"
+                        debug_info += f"   Formatos detectados: {time_formats}\n"
                     else:
                         debug_info += f"• Coluna tempo '{time_col}': NÃO ENCONTRADA\n"
                 
