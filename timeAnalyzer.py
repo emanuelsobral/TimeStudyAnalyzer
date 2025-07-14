@@ -237,9 +237,17 @@ class TimeStudyAnalyzer:
         title_label = ttk.Label(unification_frame, text="Unificação de Atividades Similares", font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, pady=10)
         
+        # Frame para botões
+        buttons_frame = ttk.Frame(unification_frame)
+        buttons_frame.grid(row=1, column=0, pady=5)
+        
         # Botão para detectar similaridades
-        detect_btn = ttk.Button(unification_frame, text="Detectar Atividades Similares", command=self.detect_similarities)
-        detect_btn.grid(row=1, column=0, pady=5)
+        detect_btn = ttk.Button(buttons_frame, text="Detectar Atividades Similares", command=self.detect_similarities)
+        detect_btn.grid(row=0, column=0, padx=5)
+        
+        # Botão para atualizar após unificações
+        refresh_btn = ttk.Button(buttons_frame, text="Atualizar Lista", command=self.detect_similarities)
+        refresh_btn.grid(row=0, column=1, padx=5)
         
         # Frame para sugestões
         suggestions_frame = ttk.Frame(unification_frame)
@@ -681,6 +689,9 @@ class TimeStudyAnalyzer:
                 if similarity > 0.7:  # Threshold de 70%
                     similarities.append((activity1, activity2, similarity))
                     
+        # Ordenar por similaridade (maior primeiro)
+        similarities.sort(key=lambda x: x[2], reverse=True)
+        
         # Adicionar similaridades à árvore
         for activity1, activity2, similarity in similarities:
             self.similarity_tree.insert("", tk.END, values=(
@@ -698,13 +709,96 @@ class TimeStudyAnalyzer:
         
     def unify_activities(self):
         """Unificar atividades selecionadas"""
-        # Implementar lógica de unificação
-        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        selected_items = self.similarity_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Aviso", "Selecione atividades para unificar")
+            return
+            
+        try:
+            for item in selected_items:
+                # Obter dados do item selecionado
+                item_data = self.similarity_tree.item(item)
+                activities_text = item_data['values'][0]
+                
+                # Extrair as duas atividades
+                if '↔' in activities_text:
+                    activity1, activity2 = activities_text.split(' ↔ ')
+                    
+                    # Perguntar qual nome usar para unificação
+                    choice_window = tk.Toplevel(self.root)
+                    choice_window.title("Escolher Nome da Atividade")
+                    choice_window.geometry("400x200")
+                    choice_window.transient(self.root)
+                    choice_window.grab_set()
+                    
+                    ttk.Label(choice_window, text="Escolha o nome para a atividade unificada:").pack(pady=10)
+                    
+                    var = tk.StringVar(value=activity1)
+                    
+                    ttk.Radiobutton(choice_window, text=activity1, variable=var, value=activity1).pack(pady=5)
+                    ttk.Radiobutton(choice_window, text=activity2, variable=var, value=activity2).pack(pady=5)
+                    
+                    # Frame para entrada customizada
+                    custom_frame = ttk.Frame(choice_window)
+                    custom_frame.pack(pady=5)
+                    
+                    ttk.Radiobutton(custom_frame, text="Nome personalizado:", variable=var, value="custom").pack(side=tk.LEFT)
+                    custom_entry = ttk.Entry(custom_frame, width=20)
+                    custom_entry.pack(side=tk.LEFT, padx=5)
+                    
+                    def confirm_unification():
+                        chosen_name = var.get()
+                        if chosen_name == "custom":
+                            chosen_name = custom_entry.get().strip()
+                            if not chosen_name:
+                                messagebox.showerror("Erro", "Digite um nome personalizado")
+                                return
+                        
+                        # Realizar unificação
+                        self.processed_data.loc[self.processed_data['Atividade'] == activity2, 'Atividade'] = chosen_name
+                        if activity1 != chosen_name:
+                            self.processed_data.loc[self.processed_data['Atividade'] == activity1, 'Atividade'] = chosen_name
+                        
+                        # Armazenar unificação
+                        self.unified_activities[activity1] = chosen_name
+                        self.unified_activities[activity2] = chosen_name
+                        
+                        # Atualizar status do item
+                        self.similarity_tree.set(item, "Ação", "Unificada")
+                        
+                        choice_window.destroy()
+                        
+                        # Atualizar interfaces
+                        self.update_processed_preview()
+                        self.update_available_activities()
+                    
+                    ttk.Button(choice_window, text="Confirmar", command=confirm_unification).pack(pady=10)
+                    
+                    # Centralizar janela
+                    choice_window.update_idletasks()
+                    x = (choice_window.winfo_screenwidth() // 2) - (choice_window.winfo_width() // 2)
+                    y = (choice_window.winfo_screenheight() // 2) - (choice_window.winfo_height() // 2)
+                    choice_window.geometry(f"+{x}+{y}")
+                    
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao unificar atividades: {str(e)}")
         
     def skip_activities(self):
         """Pular atividades selecionadas"""
-        # Implementar lógica de skip
-        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        selected_items = self.similarity_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Aviso", "Selecione atividades para pular")
+            return
+            
+        try:
+            for item in selected_items:
+                # Atualizar status do item
+                self.similarity_tree.set(item, "Ação", "Pulada")
+                
+            messagebox.showinfo("Sucesso", f"{len(selected_items)} sugestão(ões) de unificação pulada(s)")
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao pular atividades: {str(e)}")
         
     def create_new_group(self):
         """Criar novo grupo"""
