@@ -198,6 +198,10 @@ class TimeStudyAnalyzer:
         process_btn = ttk.Button(selection_frame, text="Processar Dados", command=self.process_data)
         process_btn.grid(row=0, column=4, padx=10)
         
+        # Botão de debug
+        debug_btn = ttk.Button(selection_frame, text="Debug Dados", command=self.debug_data)
+        debug_btn.grid(row=0, column=5, padx=5)
+        
         # Preview dos dados processados
         preview_label = ttk.Label(mapping_frame, text="Dados Processados:")
         preview_label.grid(row=2, column=0, sticky="w", pady=(10, 5))
@@ -486,38 +490,134 @@ class TimeStudyAnalyzer:
             
         try:
             all_data = []
+            total_rows_read = 0
+            files_processed = 0
             
             for file_path in self.uploaded_files:
-                if file_path.endswith('.xlsx'):
-                    df = pd.read_excel(file_path)
-                else:
-                    df = pd.read_csv(file_path)
+                try:
+                    # Ler arquivo
+                    if file_path.endswith('.xlsx'):
+                        df = pd.read_excel(file_path)
+                    else:
+                        # Tentar diferentes encodings para CSV
+                        try:
+                            df = pd.read_csv(file_path, encoding='utf-8')
+                        except UnicodeDecodeError:
+                            try:
+                                df = pd.read_csv(file_path, encoding='latin1')
+                            except UnicodeDecodeError:
+                                df = pd.read_csv(file_path, encoding='cp1252')
                     
-                # Extrair colunas selecionadas
-                activity_col = self.activity_combo.get()
-                time_col = self.time_combo.get()
-                
-                if activity_col in df.columns and time_col in df.columns:
-                    data = df[[activity_col, time_col]].copy()
-                    data.columns = ['Atividade', 'Tempo']
-                    all_data.append(data)
+                    print(f"Arquivo {os.path.basename(file_path)}: {len(df)} linhas lidas")
+                    total_rows_read += len(df)
                     
+                    # Extrair colunas selecionadas
+                    activity_col = self.activity_combo.get()
+                    time_col = self.time_combo.get()
+                    
+                    if activity_col in df.columns and time_col in df.columns:
+                        # Criar cópia dos dados
+                        data = df[[activity_col, time_col]].copy()
+                        data.columns = ['Atividade', 'Tempo']
+                        
+                        # Limpar espaços em branco nas atividades
+                        data['Atividade'] = data['Atividade'].astype(str).str.strip()
+                        
+                        # Filtrar linhas vazias ou nulas
+                        data = data[data['Atividade'].notna()]
+                        data = data[data['Atividade'] != '']
+                        data = data[data['Atividade'] != 'nan']
+                        
+                        print(f"Arquivo {os.path.basename(file_path)}: {len(data)} linhas válidas após limpeza")
+                        
+                        if len(data) > 0:
+                            all_data.append(data)
+                            files_processed += 1
+                    else:
+                        print(f"Colunas não encontradas no arquivo {os.path.basename(file_path)}")
+                        print(f"Colunas disponíveis: {list(df.columns)}")
+                        
+                except Exception as e:
+                    print(f"Erro ao processar arquivo {os.path.basename(file_path)}: {str(e)}")
+                    continue
+                    
+            print(f"Total de arquivos processados: {files_processed}")
+            print(f"Total de linhas lidas: {total_rows_read}")
+            
             if all_data:
+                # Concatenar todos os dados
                 self.processed_data = pd.concat(all_data, ignore_index=True)
+                print(f"Dados concatenados: {len(self.processed_data)} linhas")
                 
-                # Limpar dados nulos e converter tempo para numérico
-                self.processed_data = self.processed_data.dropna()
-                self.processed_data['Tempo'] = pd.to_numeric(self.processed_data['Tempo'], errors='coerce')
-                self.processed_data = self.processed_data.dropna()
+                # Converter tempo para numérico
+                original_count = len(self.processed_data)
                 
-                self.update_processed_preview()
-                self.update_available_activities()
-                messagebox.showinfo("Sucesso", f"Dados processados: {len(self.processed_data)} registros")
+                # Tentar converter tempo - aceitar diferentes formatos
+                def convert_time(time_val):
+                    if pd.isna(time_val):
+                        return None
+                    
+                    # Se já é numérico
+                    if isinstance(time_val, (int, float)):
+                        return float(time_val)
+                    
+                    # Se é string, tentar converter
+                    time_str = str(time_val).strip()
+                    
+                    # Remover caracteres não numéricos comuns
+                    time_str = time_str.replace(',', '.')  # Vírgula para ponto decimal
+                    time_str = time_str.replace(' ', '')   # Remover espaços
+                    
+                    # Tentar converter para float
+                    try:
+                        return float(time_str)
+                    except ValueError:
+                        return None
+                
+                self.processed_data['Tempo'] = self.processed_data['Tempo'].apply(convert_time)
+                
+                # Remover linhas com tempo inválido
+                self.processed_data = self.processed_data.dropna(subset=['Tempo'])
+                
+                # Remover tempos negativos ou zero
+                self.processed_data = self.processed_data[self.processed_data['Tempo'] > 0]
+                
+                final_count = len(self.processed_data)
+                print(f"Dados finais após validação: {final_count} linhas")
+                print(f"Linhas removidas por dados inválidos: {original_count - final_count}")
+                
+                if final_count > 0:
+                    self.update_processed_preview()
+                    self.update_available_activities()
+                    messagebox.showinfo("Sucesso", 
+                        f"Dados processados com sucesso!\n"
+                        f"• {files_processed} arquivo(s) processado(s)\n"
+                        f"• {total_rows_read} linha(s) lida(s)\n"
+                        f"• {final_count} registro(s) válido(s)\n"
+                        f"• {original_count - final_count} registro(s) removido(s) por dados inválidos")
+                else:
+                    messagebox.showerror("Erro", 
+                        f"Nenhum dado válido encontrado!\n"
+                        f"• {files_processed} arquivo(s) processado(s)\n"
+                        f"• {total_rows_read} linha(s) lida(s)\n"
+                        f"• Todos os registros foram removidos por conterem dados inválidos\n\n"
+                        f"Verifique se:\n"
+                        f"• A coluna de tempo contém valores numéricos\n"
+                        f"• A coluna de atividade não está vazia\n"
+                        f"• Os dados não contêm apenas cabeçalhos")
             else:
-                messagebox.showerror("Erro", "Nenhum dado válido encontrado")
+                messagebox.showerror("Erro", 
+                    f"Nenhum arquivo pôde ser processado!\n"
+                    f"• {len(self.uploaded_files)} arquivo(s) selecionado(s)\n"
+                    f"• 0 arquivo(s) processado(s)\n\n"
+                    f"Verifique se:\n"
+                    f"• Os arquivos não estão corrompidos\n"
+                    f"• As colunas selecionadas existem nos arquivos\n"
+                    f"• Os arquivos contêm dados válidos")
                 
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao processar dados: {str(e)}")
+            messagebox.showerror("Erro", f"Erro geral ao processar dados: {str(e)}")
+            print(f"Erro detalhado: {str(e)}")
             
     def update_processed_preview(self):
         """Atualizar preview dos dados processados"""
@@ -714,6 +814,65 @@ class TimeStudyAnalyzer:
                 
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar: {str(e)}")
+    
+    def debug_data(self):
+        """Função de debug para analisar os dados dos arquivos"""
+        if not self.uploaded_files:
+            messagebox.showwarning("Aviso", "Nenhum arquivo selecionado")
+            return
+            
+        debug_info = "=== DEBUG DOS DADOS ===\n\n"
+        
+        for i, file_path in enumerate(self.uploaded_files):
+            try:
+                debug_info += f"ARQUIVO {i+1}: {os.path.basename(file_path)}\n"
+                
+                # Ler arquivo
+                if file_path.endswith('.xlsx'):
+                    df = pd.read_excel(file_path)
+                else:
+                    df = pd.read_csv(file_path)
+                
+                debug_info += f"• Dimensões: {df.shape[0]} linhas x {df.shape[1]} colunas\n"
+                debug_info += f"• Colunas: {list(df.columns)}\n"
+                
+                # Se colunas foram selecionadas, analisar
+                if self.activity_combo.get() and self.time_combo.get():
+                    activity_col = self.activity_combo.get()
+                    time_col = self.time_combo.get()
+                    
+                    if activity_col in df.columns:
+                        debug_info += f"• Coluna atividade '{activity_col}': {df[activity_col].count()} valores não-nulos\n"
+                        debug_info += f"  Exemplos: {list(df[activity_col].dropna().head(3))}\n"
+                    else:
+                        debug_info += f"• Coluna atividade '{activity_col}': NÃO ENCONTRADA\n"
+                    
+                    if time_col in df.columns:
+                        debug_info += f"• Coluna tempo '{time_col}': {df[time_col].count()} valores não-nulos\n"
+                        debug_info += f"  Exemplos: {list(df[time_col].dropna().head(3))}\n"
+                        debug_info += f"  Tipos: {df[time_col].dtype}\n"
+                    else:
+                        debug_info += f"• Coluna tempo '{time_col}': NÃO ENCONTRADA\n"
+                
+                debug_info += f"• Primeiras 3 linhas:\n{df.head(3).to_string()}\n"
+                debug_info += "\n" + "="*50 + "\n\n"
+                
+            except Exception as e:
+                debug_info += f"ERRO ao ler arquivo: {str(e)}\n\n"
+        
+        # Mostrar em uma janela de texto
+        debug_window = tk.Toplevel(self.root)
+        debug_window.title("Debug dos Dados")
+        debug_window.geometry("800x600")
+        
+        text_widget = tk.Text(debug_window, wrap=tk.WORD)
+        scrollbar = ttk.Scrollbar(debug_window, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        text_widget.insert("1.0", debug_info)
 
 def main():
     root = tk.Tk()
