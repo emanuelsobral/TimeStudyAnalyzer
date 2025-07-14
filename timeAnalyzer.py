@@ -333,17 +333,22 @@ class TimeStudyAnalyzer:
         analysis_frame.grid_columnconfigure(0, weight=1)
         analysis_frame.grid_columnconfigure(1, weight=1)
         
+        # Frame do cabeçalho para título e botão
+        header_frame = ttk.Frame(analysis_frame)
+        header_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
+        header_frame.grid_columnconfigure(0, weight=1)  # Coluna do título expande
+        
         # Título
-        title_label = ttk.Label(analysis_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
-        title_label.grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        title_label = ttk.Label(header_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, sticky="w")
         
         # Botão de análise
-        analyze_btn = ttk.Button(analysis_frame, text="Executar Análise", command=self.perform_analysis)
-        analyze_btn.grid(row=0, column=1, sticky="e", padx=10)
+        analyze_btn = ttk.Button(header_frame, text="Executar Análise", command=self.perform_analysis)
+        analyze_btn.grid(row=0, column=1, sticky="e")
         
         # Frame esquerdo - Tabela de resultados
         left_frame = ttk.LabelFrame(analysis_frame, text="Resultados Estatísticos")
-        left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 5), pady=5)
         left_frame.grid_rowconfigure(0, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
         
@@ -363,7 +368,7 @@ class TimeStudyAnalyzer:
         
         # Frame direito - Gráficos
         right_frame = ttk.LabelFrame(analysis_frame, text="Visualizações")
-        right_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 0), pady=5)
+        right_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 10), pady=5)
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
         
