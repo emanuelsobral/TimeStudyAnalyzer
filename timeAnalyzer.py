@@ -667,8 +667,16 @@ class TimeStudyAnalyzer:
         
         if self.processed_data is not None:
             unique_activities = self.processed_data['Atividade'].unique()
+            
+            # Atividades que já estão em grupos
+            grouped_activities = set()
+            for group_data in self.activity_groups.values():
+                grouped_activities.update(group_data['activities'])
+            
+            # Adicionar apenas atividades que não estão em grupos
             for activity in sorted(unique_activities):
-                self.available_listbox.insert(tk.END, activity)
+                if activity not in grouped_activities:
+                    self.available_listbox.insert(tk.END, activity)
                 
     def detect_similarities(self):
         """Detectar atividades similares"""
@@ -802,13 +810,137 @@ class TimeStudyAnalyzer:
         
     def create_new_group(self):
         """Criar novo grupo"""
-        # Implementar criação de grupo
-        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        # Janela para criar novo grupo
+        group_window = tk.Toplevel(self.root)
+        group_window.title("Criar Novo Grupo")
+        group_window.geometry("300x150")
+        group_window.transient(self.root)
+        group_window.grab_set()
+        
+        # Nome do grupo
+        ttk.Label(group_window, text="Nome do Grupo:").pack(pady=10)
+        name_entry = ttk.Entry(group_window, width=30)
+        name_entry.pack(pady=5)
+        name_entry.focus()
+        
+        # Cor do grupo
+        ttk.Label(group_window, text="Cor do Grupo:").pack(pady=(10, 5))
+        color_var = tk.StringVar(value="#3B82F6")
+        color_frame = ttk.Frame(group_window)
+        color_frame.pack(pady=5)
+        
+        colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6", "#F97316"]
+        for i, color in enumerate(colors):
+            btn = tk.Button(color_frame, bg=color, width=3, height=1,
+                          command=lambda c=color: color_var.set(c))
+            btn.grid(row=0, column=i, padx=2)
+        
+        def confirm_group():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("Erro", "Digite um nome para o grupo")
+                return
+            
+            if name in self.activity_groups:
+                messagebox.showerror("Erro", "Já existe um grupo com este nome")
+                return
+            
+            # Criar grupo
+            self.activity_groups[name] = {
+                'color': color_var.get(),
+                'activities': []
+            }
+            
+            # Atualizar interface
+            self.update_group_tree()
+            group_window.destroy()
+            messagebox.showinfo("Sucesso", f"Grupo '{name}' criado com sucesso!")
+        
+        ttk.Button(group_window, text="Criar", command=confirm_group).pack(pady=15)
+        
+        # Centralizar janela
+        group_window.update_idletasks()
+        x = (group_window.winfo_screenwidth() // 2) - (group_window.winfo_width() // 2)
+        y = (group_window.winfo_screenheight() // 2) - (group_window.winfo_height() // 2)
+        group_window.geometry(f"+{x}+{y}")
         
     def add_to_group(self):
         """Adicionar atividades ao grupo"""
-        # Implementar adição ao grupo
-        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        # Verificar se há atividades selecionadas
+        selected_indices = self.available_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Aviso", "Selecione atividades para adicionar ao grupo")
+            return
+        
+        # Verificar se há grupos criados
+        if not self.activity_groups:
+            messagebox.showwarning("Aviso", "Crie um grupo primeiro")
+            return
+        
+        # Janela para selecionar grupo
+        select_window = tk.Toplevel(self.root)
+        select_window.title("Selecionar Grupo")
+        select_window.geometry("250x200")
+        select_window.transient(self.root)
+        select_window.grab_set()
+        
+        ttk.Label(select_window, text="Selecione o grupo:").pack(pady=10)
+        
+        # Lista de grupos
+        group_listbox = tk.Listbox(select_window)
+        group_listbox.pack(pady=5, padx=10, fill=tk.BOTH, expand=True)
+        
+        for group_name in self.activity_groups.keys():
+            group_listbox.insert(tk.END, group_name)
+        
+        def confirm_addition():
+            group_selection = group_listbox.curselection()
+            if not group_selection:
+                messagebox.showerror("Erro", "Selecione um grupo")
+                return
+            
+            group_name = group_listbox.get(group_selection[0])
+            selected_activities = [self.available_listbox.get(i) for i in selected_indices]
+            
+            # Adicionar atividades ao grupo
+            for activity in selected_activities:
+                if activity not in self.activity_groups[group_name]['activities']:
+                    self.activity_groups[group_name]['activities'].append(activity)
+            
+            # Atualizar interface
+            self.update_group_tree()
+            self.update_available_activities()
+            select_window.destroy()
+            
+            messagebox.showinfo("Sucesso", 
+                f"{len(selected_activities)} atividade(s) adicionada(s) ao grupo '{group_name}'")
+        
+        ttk.Button(select_window, text="Adicionar", command=confirm_addition).pack(pady=10)
+        
+        # Centralizar janela
+        select_window.update_idletasks()
+        x = (select_window.winfo_screenwidth() // 2) - (select_window.winfo_width() // 2)
+        y = (select_window.winfo_screenheight() // 2) - (select_window.winfo_height() // 2)
+        select_window.geometry(f"+{x}+{y}")
+    
+    def update_group_tree(self):
+        """Atualizar árvore de grupos"""
+        # Limpar árvore
+        for item in self.group_tree.get_children():
+            self.group_tree.delete(item)
+        
+        # Adicionar grupos e suas atividades
+        for group_name, group_data in self.activity_groups.items():
+            # Adicionar grupo principal
+            group_item = self.group_tree.insert("", tk.END, text=f"📁 {group_name}", 
+                                              values=(), open=True)
+            
+            # Adicionar atividades do grupo
+            for activity in group_data['activities']:
+                self.group_tree.insert(group_item, tk.END, text=f"  📊 {activity}", values=())
+        
+        # Atualizar lista de atividades disponíveis (remover as que já estão em grupos)
+        self.update_available_activities()
         
     def perform_analysis(self):
         """Executar análise estatística"""
@@ -817,42 +949,120 @@ class TimeStudyAnalyzer:
             return
             
         try:
-            # Agrupar por atividade
-            grouped = self.processed_data.groupby('Atividade')['Tempo']
-            
             # Limpar resultados anteriores
             for item in self.results_tree.get_children():
                 self.results_tree.delete(item)
+            
+            # Analisar grupos primeiro
+            for group_name, group_data in self.activity_groups.items():
+                if group_data['activities']:
+                    # Obter dados do grupo
+                    group_times = self.processed_data[
+                        self.processed_data['Atividade'].isin(group_data['activities'])
+                    ]['Tempo']
+                    
+                    if len(group_times) > 0:
+                        # Calcular estatísticas do grupo
+                        q1 = group_times.quantile(0.25)
+                        median = group_times.median()
+                        q3 = group_times.quantile(0.75)
+                        iqr = q3 - q1
+                        mean_all = group_times.mean()
+                        
+                        # Detectar outliers
+                        lower_bound = q1 - 1.5 * iqr
+                        upper_bound = q3 + 1.5 * iqr
+                        outliers = group_times[(group_times < lower_bound) | (group_times > upper_bound)]
+                        
+                        # Média sem outliers
+                        clean_times = group_times[(group_times >= lower_bound) & (group_times <= upper_bound)]
+                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
+                        
+                        # Adicionar grupo à árvore
+                        group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name}", values=(
+                            f"{q1:.2f}",
+                            f"{median:.2f}",
+                            f"{q3:.2f}",
+                            f"{iqr:.2f}",
+                            f"{mean_no_outliers:.2f}",
+                            len(outliers)
+                        ))
+                        
+                        # Analisar atividades individuais do grupo
+                        for activity in group_data['activities']:
+                            activity_times = self.processed_data[
+                                self.processed_data['Atividade'] == activity
+                            ]['Tempo']
+                            
+                            if len(activity_times) > 0:
+                                a_q1 = activity_times.quantile(0.25)
+                                a_median = activity_times.median()
+                                a_q3 = activity_times.quantile(0.75)
+                                a_iqr = a_q3 - a_q1
+                                a_mean_all = activity_times.mean()
+                                
+                                a_lower_bound = a_q1 - 1.5 * a_iqr
+                                a_upper_bound = a_q3 + 1.5 * a_iqr
+                                a_outliers = activity_times[(activity_times < a_lower_bound) | (activity_times > a_upper_bound)]
+                                
+                                a_clean_times = activity_times[(activity_times >= a_lower_bound) & (activity_times <= a_upper_bound)]
+                                a_mean_no_outliers = a_clean_times.mean() if len(a_clean_times) > 0 else a_mean_all
+                                
+                                # Adicionar atividade como filho do grupo
+                                self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity}", values=(
+                                    f"{a_q1:.2f}",
+                                    f"{a_median:.2f}",
+                                    f"{a_q3:.2f}",
+                                    f"{a_iqr:.2f}",
+                                    f"{a_mean_no_outliers:.2f}",
+                                    len(a_outliers)
+                                ))
+            
+            # Analisar atividades não agrupadas
+            grouped_activities = set()
+            for group_data in self.activity_groups.values():
+                grouped_activities.update(group_data['activities'])
+            
+            ungrouped_activities = self.processed_data[
+                ~self.processed_data['Atividade'].isin(grouped_activities)
+            ]
+            
+            if len(ungrouped_activities) > 0:
+                # Adicionar seção de atividades não agrupadas
+                ungrouped_item = self.results_tree.insert("", tk.END, text="📋 Atividades Não Agrupadas", values=())
                 
-            # Calcular estatísticas para cada atividade
-            for activity, times in grouped:
-                q1 = times.quantile(0.25)
-                median = times.median()
-                q3 = times.quantile(0.75)
-                iqr = q3 - q1
-                mean_all = times.mean()
+                # Agrupar por atividade
+                grouped = ungrouped_activities.groupby('Atividade')['Tempo']
                 
-                # Detectar outliers
-                lower_bound = q1 - 1.5 * iqr
-                upper_bound = q3 + 1.5 * iqr
-                outliers = times[(times < lower_bound) | (times > upper_bound)]
-                
-                # Média sem outliers
-                clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
-                mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
-                
-                # Adicionar à árvore
-                self.results_tree.insert("", tk.END, text=activity, values=(
-                    f"{q1:.2f}",
-                    f"{median:.2f}",
-                    f"{q3:.2f}",
-                    f"{iqr:.2f}",
-                    f"{mean_no_outliers:.2f}",
-                    len(outliers)
-                ))
+                for activity, times in grouped:
+                    if len(times) > 0:
+                        q1 = times.quantile(0.25)
+                        median = times.median()
+                        q3 = times.quantile(0.75)
+                        iqr = q3 - q1
+                        mean_all = times.mean()
+                        
+                        # Detectar outliers
+                        lower_bound = q1 - 1.5 * iqr
+                        upper_bound = q3 + 1.5 * iqr
+                        outliers = times[(times < lower_bound) | (times > upper_bound)]
+                        
+                        # Média sem outliers
+                        clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
+                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
+                        
+                        # Adicionar à árvore
+                        self.results_tree.insert(ungrouped_item, tk.END, text=f"  📊 {activity}", values=(
+                            f"{q1:.2f}",
+                            f"{median:.2f}",
+                            f"{q3:.2f}",
+                            f"{iqr:.2f}",
+                            f"{mean_no_outliers:.2f}",
+                            len(outliers)
+                        ))
                 
             self.create_boxplot()
-            messagebox.showinfo("Sucesso", "Análise estatística concluída")
+            messagebox.showinfo("Sucesso", "Análise estatística concluída com suporte a grupos")
             
         except Exception as e:
             messagebox.showerror("Erro", f"Erro na análise: {str(e)}")
