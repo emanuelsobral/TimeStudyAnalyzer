@@ -564,6 +564,31 @@ class TimeStudyAnalyzer:
                     # Se é string, tentar converter
                     time_str = str(time_val).strip()
                     
+                    # Verificar se é formato de tempo (HH:MM:SS, MM:SS, etc.)
+                    if ':' in time_str:
+                        try:
+                            # Dividir por ':'
+                            parts = time_str.split(':')
+                            total_seconds = 0
+                            
+                            if len(parts) == 3:  # HH:MM:SS
+                                hours = float(parts[0])
+                                minutes = float(parts[1])
+                                seconds = float(parts[2])
+                                total_seconds = hours * 3600 + minutes * 60 + seconds
+                            elif len(parts) == 2:  # MM:SS
+                                minutes = float(parts[0])
+                                seconds = float(parts[1])
+                                total_seconds = minutes * 60 + seconds
+                            else:
+                                return None
+                                
+                            return total_seconds
+                            
+                        except (ValueError, IndexError):
+                            # Se falhar, tentar outros métodos
+                            pass
+                    
                     # Remover caracteres não numéricos comuns
                     time_str = time_str.replace(',', '.')  # Vírgula para ponto decimal
                     time_str = time_str.replace(' ', '')   # Remover espaços
@@ -851,6 +876,28 @@ class TimeStudyAnalyzer:
                         debug_info += f"• Coluna tempo '{time_col}': {df[time_col].count()} valores não-nulos\n"
                         debug_info += f"  Exemplos: {list(df[time_col].dropna().head(3))}\n"
                         debug_info += f"  Tipos: {df[time_col].dtype}\n"
+                        
+                        # Detectar formato de tempo
+                        sample_values = df[time_col].dropna().head(5)
+                        time_formats = []
+                        for val in sample_values:
+                            val_str = str(val).strip()
+                            if ':' in val_str:
+                                parts = val_str.split(':')
+                                if len(parts) == 3:
+                                    time_formats.append("HH:MM:SS")
+                                elif len(parts) == 2:
+                                    time_formats.append("MM:SS")
+                                else:
+                                    time_formats.append("Formato desconhecido")
+                            else:
+                                try:
+                                    float(val_str.replace(',', '.'))
+                                    time_formats.append("Numérico")
+                                except:
+                                    time_formats.append("Texto")
+                        
+                        debug_info += f"  Formatos detectados: {time_formats}\n"
                     else:
                         debug_info += f"• Coluna tempo '{time_col}': NÃO ENCONTRADA\n"
                 
