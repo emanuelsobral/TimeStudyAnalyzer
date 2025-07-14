@@ -334,7 +334,7 @@ class TimeStudyAnalyzer:
         # Frame do cabeçalho para título e botão
         header_frame = ttk.Frame(analysis_frame)
         header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
-        header_frame.grid_columnconfigure(0, weight=1)  # Coluna do título expande
+        header_frame.grid_columnconfigure(0, weight=1)
         
         # Título
         title_label = ttk.Label(header_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
@@ -412,7 +412,7 @@ class TimeStudyAnalyzer:
         export_excel_btn.grid(row=0, column=0, padx=10, pady=10)
         
         # Botão de exportar CSV
-        export_csv_btn = ttk.Button(options_frame, text="Exportar para CSV", command=self.export_to_csv)
+        export_csv_btn = ttk.Button(options_frame, text="Exportar para CSV (Simples)", command=self.export_to_csv)
         export_csv_btn.grid(row=0, column=1, padx=10, pady=10)
         
         # Label de status
@@ -801,8 +801,8 @@ class TimeStudyAnalyzer:
                     
                     # Centralizar janela
                     choice_window.update_idletasks()
-                    x = (choice_window.winfo_screenwidth() // 2) - (choice_window.winfo_width() // 2)
-                    y = (choice_window.winfo_screenheight() // 2) - (choice_window.winfo_height() // 2)
+                    x = (self.root.winfo_screenwidth() // 2) - (choice_window.winfo_width() // 2)
+                    y = (self.root.winfo_screenheight() // 2) - (choice_window.winfo_height() // 2)
                     choice_window.geometry(f"+{x}+{y}")
                     
         except Exception as e:
@@ -877,8 +877,8 @@ class TimeStudyAnalyzer:
         
         # Centralizar janela
         group_window.update_idletasks()
-        x = (group_window.winfo_screenwidth() // 2) - (group_window.winfo_width() // 2)
-        y = (group_window.winfo_screenheight() // 2) - (group_window.winfo_height() // 2)
+        x = (self.root.winfo_screenwidth() // 2) - (group_window.winfo_width() // 2)
+        y = (self.root.winfo_screenheight() // 2) - (group_window.winfo_height() // 2)
         group_window.geometry(f"+{x}+{y}")
         
     def add_to_group(self):
@@ -936,8 +936,8 @@ class TimeStudyAnalyzer:
         
         # Centralizar janela
         select_window.update_idletasks()
-        x = (select_window.winfo_screenwidth() // 2) - (select_window.winfo_width() // 2)
-        y = (select_window.winfo_screenheight() // 2) - (select_window.winfo_height() // 2)
+        x = (self.root.winfo_screenwidth() // 2) - (select_window.winfo_width() // 2)
+        y = (self.root.winfo_screenheight() // 2) - (select_window.winfo_height() // 2)
         select_window.geometry(f"+{x}+{y}")
     
     def update_group_tree(self):
@@ -1080,29 +1080,85 @@ class TimeStudyAnalyzer:
             messagebox.showerror("Erro", f"Erro na análise estatística:\n{str(e)}\n\nVerifique o console para mais detalhes.")
             
     def export_to_excel(self):
-        """Exportar resultados para Excel"""
+        """Exportar resultados para Excel no formato customizado."""
         if self.processed_data is None:
-            messagebox.showwarning("Aviso", "Nenhum dado para exportar")
+            messagebox.showwarning("Aviso", "Nenhum dado para exportar. Execute a análise primeiro.")
             return
-            
+
+        if not self.results_tree.get_children():
+            messagebox.showwarning("Aviso", "Nenhuma análise encontrada para exportar. Execute a análise primeiro.")
+            return
+
         try:
             filename = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx")]
+                filetypes=[("Arquivos Excel", "*.xlsx"), ("Todos os Arquivos", "*.*")]
             )
+            if not filename:
+                return
+
+            # --- Parte 1: Preparar dados brutos pivotados ---
+            # Mapeamento de atividade para grupo
+            activity_to_group = {activity: group_name
+                                 for group_name, data in self.activity_groups.items()
+                                 for activity in data['activities']}
+
+            df_part1 = self.processed_data.copy()
+            df_part1['Processos'] = df_part1['Atividade'].map(activity_to_group).fillna('')
             
-            if filename:
-                with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                    self.processed_data.to_excel(writer, sheet_name='Dados Processados', index=False)
-                    
-                self.export_status.config(text=f"Exportado para: {filename}")
-                messagebox.showinfo("Sucesso", "Dados exportados com sucesso!")
+            # Agrupar tempos em listas por atividade
+            pivoted_times = df_part1.groupby(['Processos', 'Atividade'])['Tempo'].apply(list).reset_index(name='Tempos')
+            
+            # Expandir as listas de tempo em colunas "Amostra N"
+            max_samples = pivoted_times['Tempos'].str.len().max()
+            sample_cols = [f'Amostra {i+1}' for i in range(max_samples)]
+            
+            time_df = pd.DataFrame(pivoted_times['Tempos'].tolist(), index=pivoted_times.index, columns=sample_cols)
+            
+            # Juntar as informações com os tempos expandidos
+            part1_df = pd.concat([pivoted_times[['Processos', 'Atividade']], time_df], axis=1)
+            part1_df.insert(1, 'COD', '') # Adicionar coluna COD em branco
+            part1_df.rename(columns={'Atividade': 'Atividades da Coleta'}, inplace=True)
+
+
+            # --- Parte 2: Preparar tabela de análise ---
+            analysis_data = []
+            headers = ['Atividade/Grupo'] + [self.results_tree.heading(col)['text'] for col in self.results_tree['columns']]
+
+            for item_id in self.results_tree.get_children():
+                # Item pai (Grupo ou categoria principal)
+                parent_text = self.results_tree.item(item_id, 'text').strip()
+                parent_values = list(self.results_tree.item(item_id, 'values'))
+                analysis_data.append([parent_text] + parent_values)
+
+                # Itens filhos (atividades dentro do grupo)
+                for child_id in self.results_tree.get_children(item_id):
+                    child_text = "    " + self.results_tree.item(child_id, 'text').strip()
+                    child_values = list(self.results_tree.item(child_id, 'values'))
+                    analysis_data.append([child_text] + child_values)
+            
+            part2_df = pd.DataFrame(analysis_data, columns=headers)
+
+            # --- Escrever no arquivo Excel ---
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                part1_df.to_excel(writer, sheet_name='Exportação Completa', index=False)
                 
+                # Calcular a coluna de início para a segunda tabela
+                start_col_part2 = part1_df.shape[1] + 1  # +1 para a coluna em branco
+                
+                part2_df.to_excel(writer, sheet_name='Exportação Completa', index=False, startrow=0, startcol=start_col_part2)
+
+            self.export_status.config(text=f"Exportado para: {filename}")
+            messagebox.showinfo("Sucesso", "Dados exportados com sucesso para o formato customizado!")
+
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao exportar: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Erro detalhado na exportação: {error_details}")
+            messagebox.showerror("Erro", f"Erro ao exportar para Excel: {str(e)}")
             
     def export_to_csv(self):
-        """Exportar resultados para CSV"""
+        """Exportar resultados para CSV (formato simples)"""
         if self.processed_data is None:
             messagebox.showwarning("Aviso", "Nenhum dado para exportar")
             return
@@ -1114,9 +1170,10 @@ class TimeStudyAnalyzer:
             )
             
             if filename:
+                # Exportação CSV mantém o formato simples dos dados processados
                 self.processed_data.to_csv(filename, index=False)
                 self.export_status.config(text=f"Exportado para: {filename}")
-                messagebox.showinfo("Sucesso", "Dados exportados com sucesso!")
+                messagebox.showinfo("Sucesso", "Dados brutos exportados com sucesso para CSV!")
                 
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar: {str(e)}")
