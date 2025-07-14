@@ -360,11 +360,17 @@ class TimeStudyAnalyzer:
         self.results_tree.heading("IQR", text="IQR")
         self.results_tree.heading("Média", text="Média")
         self.results_tree.heading("Outliers", text="Outliers")
-        self.results_tree.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.results_tree.grid(row=0, column=0, sticky="nsew")
         
-        results_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=self.results_tree.yview)
-        results_scroll.grid(row=0, column=1, sticky="ns")
-        self.results_tree.configure(yscrollcommand=results_scroll.set)
+        # Scrollbar Vertical
+        results_v_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=self.results_tree.yview)
+        results_v_scroll.grid(row=0, column=1, sticky="ns")
+        self.results_tree.configure(yscrollcommand=results_v_scroll.set)
+        
+        # Scrollbar Horizontal
+        results_h_scroll = ttk.Scrollbar(left_frame, orient="horizontal", command=self.results_tree.xview)
+        results_h_scroll.grid(row=1, column=0, sticky="ew")
+        self.results_tree.configure(xscrollcommand=results_h_scroll.set)
         
         # Frame direito - Gráficos
         right_frame = ttk.LabelFrame(analysis_frame, text="Visualizações")
