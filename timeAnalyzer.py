@@ -363,8 +363,8 @@ class TimeStudyAnalyzer:
         col_headings = {
             "n": ("N", 40), "std_dev": ("Desvio Padrão", 90), "min": ("Mínimo", 80), 
             "max": ("Máximo", 80), "median": ("Mediana", 80), "q1": ("Q1", 80), 
-            "q3": ("Q3", 80), "iqr": ("IQR", 80), "lower_fence": ("Limite Inf.", 80),
-            "upper_fence": ("Limite Sup.", 80), "outlier_count": ("Outliers", 60),
+            "q3": ("Q3", 80), "iqr": ("IQR", 80), "lower_fence": ("Limite Inf.", 90),
+            "upper_fence": ("Limite Sup.", 90), "outlier_count": ("Outliers", 60),
             "non_outlier_count": ("Dentro Lim.", 70), "mean_all": ("Média Geral", 80),
             "mean_no_outliers": ("Média s/ Out.", 80),
             "time_non_norm": ("T. Não Norm. (min)", 120),
@@ -960,14 +960,21 @@ class TimeStudyAnalyzer:
         self.update_available_activities()
 
     def format_seconds_to_hms(self, seconds):
-        """Converte segundos para o formato HH:MM:SS."""
-        if pd.isna(seconds) or seconds < 0:
+        """Converte segundos para o formato HH:MM:SS, lidando com valores negativos."""
+        if pd.isna(seconds):
             return "N/A"
         try:
             seconds = float(seconds)
+            
+            # Lida com o sinal
+            sign = "-" if seconds < 0 else ""
+            seconds = abs(seconds)
+            
             hours, remainder = divmod(seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+            minutes, seconds_part = divmod(remainder, 60)
+            
+            return f"{sign}{int(hours):02d}:{int(minutes):02d}:{int(seconds_part):02d}"
+            
         except (ValueError, TypeError):
             return "N/A"
 
