@@ -335,7 +335,7 @@ class TimeStudyAnalyzer:
         
         # Título
         title_label = ttk.Label(analysis_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
-        title_label.grid(row=0, column=0, columnspan=2, pady=10)
+        title_label.grid(row=0, column=0, sticky="w", padx=10, pady=10)
         
         # Botão de análise
         analyze_btn = ttk.Button(analysis_frame, text="Executar Análise", command=self.perform_analysis)
