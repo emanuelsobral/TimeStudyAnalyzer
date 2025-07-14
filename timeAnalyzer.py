@@ -953,70 +953,80 @@ class TimeStudyAnalyzer:
             for item in self.results_tree.get_children():
                 self.results_tree.delete(item)
             
-            # Analisar grupos primeiro
-            for group_name, group_data in self.activity_groups.items():
-                if group_data['activities']:
-                    # Obter dados do grupo
-                    group_times = self.processed_data[
-                        self.processed_data['Atividade'].isin(group_data['activities'])
-                    ]['Tempo']
-                    
-                    if len(group_times) > 0:
-                        # Calcular estatísticas do grupo
-                        q1 = group_times.quantile(0.25)
-                        median = group_times.median()
-                        q3 = group_times.quantile(0.75)
-                        iqr = q3 - q1
-                        mean_all = group_times.mean()
+            # Verificar se há dados para analisar
+            if len(self.processed_data) == 0:
+                messagebox.showwarning("Aviso", "Não há dados válidos para analisar")
+                return
+            
+            total_analyzed = 0
+            
+            # Analisar grupos primeiro (se existirem)
+            if self.activity_groups:
+                for group_name, group_data in self.activity_groups.items():
+                    if group_data['activities']:
+                        # Obter dados do grupo
+                        group_times = self.processed_data[
+                            self.processed_data['Atividade'].isin(group_data['activities'])
+                        ]['Tempo']
                         
-                        # Detectar outliers
-                        lower_bound = q1 - 1.5 * iqr
-                        upper_bound = q3 + 1.5 * iqr
-                        outliers = group_times[(group_times < lower_bound) | (group_times > upper_bound)]
-                        
-                        # Média sem outliers
-                        clean_times = group_times[(group_times >= lower_bound) & (group_times <= upper_bound)]
-                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
-                        
-                        # Adicionar grupo à árvore
-                        group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name}", values=(
-                            f"{q1:.2f}",
-                            f"{median:.2f}",
-                            f"{q3:.2f}",
-                            f"{iqr:.2f}",
-                            f"{mean_no_outliers:.2f}",
-                            len(outliers)
-                        ))
-                        
-                        # Analisar atividades individuais do grupo
-                        for activity in group_data['activities']:
-                            activity_times = self.processed_data[
-                                self.processed_data['Atividade'] == activity
-                            ]['Tempo']
+                        if len(group_times) > 0:
+                            total_analyzed += len(group_times)
                             
-                            if len(activity_times) > 0:
-                                a_q1 = activity_times.quantile(0.25)
-                                a_median = activity_times.median()
-                                a_q3 = activity_times.quantile(0.75)
-                                a_iqr = a_q3 - a_q1
-                                a_mean_all = activity_times.mean()
+                            # Calcular estatísticas do grupo
+                            q1 = group_times.quantile(0.25)
+                            median = group_times.median()
+                            q3 = group_times.quantile(0.75)
+                            iqr = q3 - q1
+                            mean_all = group_times.mean()
+                            
+                            # Detectar outliers
+                            lower_bound = q1 - 1.5 * iqr
+                            upper_bound = q3 + 1.5 * iqr
+                            outliers = group_times[(group_times < lower_bound) | (group_times > upper_bound)]
+                            
+                            # Média sem outliers
+                            clean_times = group_times[(group_times >= lower_bound) & (group_times <= upper_bound)]
+                            mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
+                            
+                            # Adicionar grupo à árvore
+                            group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name} ({len(group_times)} registros)", values=(
+                                f"{q1:.2f}s",
+                                f"{median:.2f}s",
+                                f"{q3:.2f}s",
+                                f"{iqr:.2f}s",
+                                f"{mean_no_outliers:.2f}s",
+                                f"{len(outliers)} outliers"
+                            ))
+                            
+                            # Analisar atividades individuais do grupo
+                            for activity in group_data['activities']:
+                                activity_times = self.processed_data[
+                                    self.processed_data['Atividade'] == activity
+                                ]['Tempo']
                                 
-                                a_lower_bound = a_q1 - 1.5 * a_iqr
-                                a_upper_bound = a_q3 + 1.5 * a_iqr
-                                a_outliers = activity_times[(activity_times < a_lower_bound) | (activity_times > a_upper_bound)]
-                                
-                                a_clean_times = activity_times[(activity_times >= a_lower_bound) & (activity_times <= a_upper_bound)]
-                                a_mean_no_outliers = a_clean_times.mean() if len(a_clean_times) > 0 else a_mean_all
-                                
-                                # Adicionar atividade como filho do grupo
-                                self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity}", values=(
-                                    f"{a_q1:.2f}",
-                                    f"{a_median:.2f}",
-                                    f"{a_q3:.2f}",
-                                    f"{a_iqr:.2f}",
-                                    f"{a_mean_no_outliers:.2f}",
-                                    len(a_outliers)
-                                ))
+                                if len(activity_times) > 0:
+                                    a_q1 = activity_times.quantile(0.25)
+                                    a_median = activity_times.median()
+                                    a_q3 = activity_times.quantile(0.75)
+                                    a_iqr = a_q3 - a_q1
+                                    a_mean_all = activity_times.mean()
+                                    
+                                    a_lower_bound = a_q1 - 1.5 * a_iqr
+                                    a_upper_bound = a_q3 + 1.5 * a_iqr
+                                    a_outliers = activity_times[(activity_times < a_lower_bound) | (activity_times > a_upper_bound)]
+                                    
+                                    a_clean_times = activity_times[(activity_times >= a_lower_bound) & (activity_times <= a_upper_bound)]
+                                    a_mean_no_outliers = a_clean_times.mean() if len(a_clean_times) > 0 else a_mean_all
+                                    
+                                    # Adicionar atividade como filho do grupo
+                                    self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity} ({len(activity_times)} reg.)", values=(
+                                        f"{a_q1:.2f}s",
+                                        f"{a_median:.2f}s",
+                                        f"{a_q3:.2f}s",
+                                        f"{a_iqr:.2f}s",
+                                        f"{a_mean_no_outliers:.2f}s",
+                                        f"{len(a_outliers)}"
+                                    ))
             
             # Analisar atividades não agrupadas
             grouped_activities = set()
@@ -1029,13 +1039,15 @@ class TimeStudyAnalyzer:
             
             if len(ungrouped_activities) > 0:
                 # Adicionar seção de atividades não agrupadas
-                ungrouped_item = self.results_tree.insert("", tk.END, text="📋 Atividades Não Agrupadas", values=())
+                ungrouped_item = self.results_tree.insert("", tk.END, text=f"📋 Atividades Não Agrupadas ({len(ungrouped_activities)} registros)", values=())
                 
                 # Agrupar por atividade
                 grouped = ungrouped_activities.groupby('Atividade')['Tempo']
                 
                 for activity, times in grouped:
                     if len(times) > 0:
+                        total_analyzed += len(times)
+                        
                         q1 = times.quantile(0.25)
                         median = times.median()
                         q3 = times.quantile(0.75)
@@ -1052,20 +1064,77 @@ class TimeStudyAnalyzer:
                         mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
                         
                         # Adicionar à árvore
-                        self.results_tree.insert(ungrouped_item, tk.END, text=f"  📊 {activity}", values=(
-                            f"{q1:.2f}",
-                            f"{median:.2f}",
-                            f"{q3:.2f}",
-                            f"{iqr:.2f}",
-                            f"{mean_no_outliers:.2f}",
-                            len(outliers)
+                        self.results_tree.insert(ungrouped_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
+                            f"{q1:.2f}s",
+                            f"{median:.2f}s",
+                            f"{q3:.2f}s",
+                            f"{iqr:.2f}s",
+                            f"{mean_no_outliers:.2f}s",
+                            f"{len(outliers)}"
+                        ))
+            
+            # Se não há grupos, analisar todas as atividades
+            if not self.activity_groups and len(ungrouped_activities) == 0:
+                # Analisar todas as atividades
+                all_item = self.results_tree.insert("", tk.END, text=f"📊 Todas as Atividades ({len(self.processed_data)} registros)", values=())
+                
+                grouped = self.processed_data.groupby('Atividade')['Tempo']
+                
+                for activity, times in grouped:
+                    if len(times) > 0:
+                        total_analyzed += len(times)
+                        
+                        q1 = times.quantile(0.25)
+                        median = times.median()
+                        q3 = times.quantile(0.75)
+                        iqr = q3 - q1
+                        mean_all = times.mean()
+                        
+                        # Detectar outliers
+                        lower_bound = q1 - 1.5 * iqr
+                        upper_bound = q3 + 1.5 * iqr
+                        outliers = times[(times < lower_bound) | (times > upper_bound)]
+                        
+                        # Média sem outliers
+                        clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
+                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
+                        
+                        # Adicionar à árvore
+                        self.results_tree.insert(all_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
+                            f"{q1:.2f}s",
+                            f"{median:.2f}s",
+                            f"{q3:.2f}s",
+                            f"{iqr:.2f}s",
+                            f"{mean_no_outliers:.2f}s",
+                            f"{len(outliers)}"
                         ))
                 
+            # Expandir todas as seções
+            for item in self.results_tree.get_children():
+                self.results_tree.item(item, open=True)
+                
+            # Criar gráfico
             self.create_boxplot()
-            messagebox.showinfo("Sucesso", "Análise estatística concluída com suporte a grupos")
+            
+            # Mostrar estatísticas gerais
+            unique_activities = len(self.processed_data['Atividade'].unique())
+            total_time = self.processed_data['Tempo'].sum()
+            avg_time = self.processed_data['Tempo'].mean()
+            
+            messagebox.showinfo("Análise Concluída", 
+                f"Análise estatística concluída com sucesso!\n\n"
+                f"📊 Estatísticas Gerais:\n"
+                f"• Total de registros analisados: {total_analyzed}\n"
+                f"• Atividades únicas: {unique_activities}\n"
+                f"• Tempo total: {total_time:.2f} segundos ({total_time/60:.1f} minutos)\n"
+                f"• Tempo médio por registro: {avg_time:.2f} segundos\n"
+                f"• Grupos criados: {len(self.activity_groups)}")
             
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro na análise: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Erro detalhado na análise: {error_details}")
+            messagebox.showerror("Erro", f"Erro na análise estatística:\n{str(e)}\n\nVerifique o console para mais detalhes.")
             
     def create_boxplot(self):
         """Criar boxplot dos dados"""
@@ -1074,8 +1143,13 @@ class TimeStudyAnalyzer:
             for widget in self.plot_frame.winfo_children():
                 widget.destroy()
                 
-            # Criar figura
-            fig, ax = plt.subplots(figsize=(8, 6))
+            # Verificar se há dados
+            if self.processed_data is None or len(self.processed_data) == 0:
+                # Mostrar mensagem de não há dados
+                no_data_label = ttk.Label(self.plot_frame, text="Nenhum dado disponível para visualização", 
+                                        font=("Arial", 12), foreground="gray")
+                no_data_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+                return
             
             # Preparar dados para boxplot
             activities = []
@@ -1083,15 +1157,43 @@ class TimeStudyAnalyzer:
             
             grouped = self.processed_data.groupby('Atividade')['Tempo']
             for activity, times in grouped:
-                activities.append(activity)
-                times_list.append(times.values)
-                
-            # Criar boxplot
-            ax.boxplot(times_list, labels=activities)
-            ax.set_title('Distribuição de Tempos por Atividade')
-            ax.set_ylabel('Tempo (segundos)')
-            ax.tick_params(axis='x', rotation=45)
+                if len(times) > 0:  # Só incluir atividades com dados
+                    activities.append(activity[:20] + "..." if len(activity) > 20 else activity)  # Truncar nomes longos
+                    times_list.append(times.values)
             
+            if not times_list:
+                # Mostrar mensagem de não há dados válidos
+                no_data_label = ttk.Label(self.plot_frame, text="Nenhum dado válido para visualização", 
+                                        font=("Arial", 12), foreground="gray")
+                no_data_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+                return
+            
+            # Criar figura com tamanho ajustado
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor('white')
+            
+            # Criar boxplot
+            bp = ax.boxplot(times_list, labels=activities, patch_artist=True)
+            
+            # Personalizar cores
+            colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 'lightpink', 'lightgray']
+            for patch, color in zip(bp['boxes'], colors * len(bp['boxes'])):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.7)
+            
+            # Configurar gráfico
+            ax.set_title('Distribuição de Tempos por Atividade', fontsize=14, fontweight='bold')
+            ax.set_ylabel('Tempo (segundos)', fontsize=12)
+            ax.set_xlabel('Atividades', fontsize=12)
+            
+            # Rotacionar labels se necessário
+            if len(activities) > 5:
+                ax.tick_params(axis='x', rotation=45)
+            
+            # Adicionar grid
+            ax.grid(True, alpha=0.3)
+            
+            # Ajustar layout
             plt.tight_layout()
             
             # Incorporar no tkinter
@@ -1099,8 +1201,17 @@ class TimeStudyAnalyzer:
             canvas.draw()
             canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
             
+            print(f"Boxplot criado com sucesso para {len(activities)} atividades")
+            
         except Exception as e:
-            print(f"Erro ao criar gráfico: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Erro detalhado ao criar gráfico: {error_details}")
+            
+            # Mostrar mensagem de erro no frame
+            error_label = ttk.Label(self.plot_frame, text=f"Erro ao criar gráfico:\n{str(e)}", 
+                                  font=("Arial", 10), foreground="red")
+            error_label.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
             
     def export_to_excel(self):
         """Exportar resultados para Excel"""
