@@ -350,20 +350,20 @@ class TimeStudyAnalyzer:
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
         
-        # Definir as colunas da tabela
+        # Definir as colunas da tabela com a nova ordem
         cols = (
-            "n", "min", "max", "q1", "median", "q3", "iqr", 
+            "n", "std_dev", "min", "max", "median", "q1", "q3", "iqr", 
             "lower_fence", "upper_fence", "outlier_count", "non_outlier_count",
             "mean_all", "mean_no_outliers", "time_non_norm", "time_norm"
         )
         
         self.results_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings")
         
-        # Definir os cabeçalhos das colunas e larguras
+        # Definir os cabeçalhos das colunas e larguras com a nova ordem
         col_headings = {
-            "n": ("N", 40), "min": ("Mínimo", 80), "max": ("Máximo", 80),
-            "q1": ("Q1", 80), "median": ("Mediana", 80), "q3": ("Q3", 80),
-            "iqr": ("IQR", 80), "lower_fence": ("Limite Inf.", 80),
+            "n": ("N", 40), "std_dev": ("Desvio Padrão", 90), "min": ("Mínimo", 80), 
+            "max": ("Máximo", 80), "median": ("Mediana", 80), "q1": ("Q1", 80), 
+            "q3": ("Q3", 80), "iqr": ("IQR", 80), "lower_fence": ("Limite Inf.", 80),
             "upper_fence": ("Limite Sup.", 80), "outlier_count": ("Outliers", 60),
             "non_outlier_count": ("Dentro Lim.", 70), "mean_all": ("Média Geral", 80),
             "mean_no_outliers": ("Média s/ Out.", 80),
@@ -961,7 +961,7 @@ class TimeStudyAnalyzer:
 
     def format_seconds_to_hms(self, seconds):
         """Converte segundos para o formato HH:MM:SS."""
-        if pd.isna(seconds):
+        if pd.isna(seconds) or seconds < 0:
             return "N/A"
         try:
             seconds = float(seconds)
@@ -978,6 +978,7 @@ class TimeStudyAnalyzer:
 
         # Métricas básicas
         n = len(times_series)
+        std_dev = times_series.std()
         min_time = times_series.min()
         max_time = times_series.max()
         q1 = times_series.quantile(0.25)
@@ -1000,13 +1001,14 @@ class TimeStudyAnalyzer:
         time_non_norm = mean_all / 60
         time_norm = mean_no_outliers / 60
         
-        # Formatação para exibição
+        # Formatação para exibição na nova ordem
         values = (
             n,
+            self.format_seconds_to_hms(std_dev),
             self.format_seconds_to_hms(min_time),
             self.format_seconds_to_hms(max_time),
-            self.format_seconds_to_hms(q1),
             self.format_seconds_to_hms(median),
+            self.format_seconds_to_hms(q1),
             self.format_seconds_to_hms(q3),
             self.format_seconds_to_hms(iqr),
             self.format_seconds_to_hms(lower_bound),
