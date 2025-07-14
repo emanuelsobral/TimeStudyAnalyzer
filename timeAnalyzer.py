@@ -938,7 +938,19 @@ class TimeStudyAnalyzer:
         
         # Atualizar lista de atividades disponíveis (remover as que já estão em grupos)
         self.update_available_activities()
-        
+
+    def format_seconds_to_hms(self, seconds):
+        """Converte segundos para o formato HH:MM:SS."""
+        if pd.isna(seconds):
+            return "N/A"
+        try:
+            seconds = float(seconds)
+            hours, remainder = divmod(seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+        except (ValueError, TypeError):
+            return "N/A"
+
     def perform_analysis(self):
         """Executar análise estatística"""
         if self.processed_data is None:
@@ -987,11 +999,11 @@ class TimeStudyAnalyzer:
                             
                             # Adicionar grupo à árvore
                             group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name} ({len(group_times)} registros)", values=(
-                                f"{q1:.2f}s",
-                                f"{median:.2f}s",
-                                f"{q3:.2f}s",
-                                f"{iqr:.2f}s",
-                                f"{mean_no_outliers:.2f}s",
+                                self.format_seconds_to_hms(q1),
+                                self.format_seconds_to_hms(median),
+                                self.format_seconds_to_hms(q3),
+                                self.format_seconds_to_hms(iqr),
+                                self.format_seconds_to_hms(mean_no_outliers),
                                 f"{len(outliers)} outliers"
                             ))
                             
@@ -1017,11 +1029,11 @@ class TimeStudyAnalyzer:
                                     
                                     # Adicionar atividade como filho do grupo
                                     self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity} ({len(activity_times)} reg.)", values=(
-                                        f"{a_q1:.2f}s",
-                                        f"{a_median:.2f}s",
-                                        f"{a_q3:.2f}s",
-                                        f"{a_iqr:.2f}s",
-                                        f"{a_mean_no_outliers:.2f}s",
+                                        self.format_seconds_to_hms(a_q1),
+                                        self.format_seconds_to_hms(a_median),
+                                        self.format_seconds_to_hms(a_q3),
+                                        self.format_seconds_to_hms(a_iqr),
+                                        self.format_seconds_to_hms(a_mean_no_outliers),
                                         f"{len(a_outliers)}"
                                     ))
             
@@ -1062,11 +1074,11 @@ class TimeStudyAnalyzer:
                         
                         # Adicionar à árvore
                         self.results_tree.insert(ungrouped_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
-                            f"{q1:.2f}s",
-                            f"{median:.2f}s",
-                            f"{q3:.2f}s",
-                            f"{iqr:.2f}s",
-                            f"{mean_no_outliers:.2f}s",
+                            self.format_seconds_to_hms(q1),
+                            self.format_seconds_to_hms(median),
+                            self.format_seconds_to_hms(q3),
+                            self.format_seconds_to_hms(iqr),
+                            self.format_seconds_to_hms(mean_no_outliers),
                             f"{len(outliers)}"
                         ))
             
@@ -1098,11 +1110,11 @@ class TimeStudyAnalyzer:
                         
                         # Adicionar à árvore
                         self.results_tree.insert(all_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
-                            f"{q1:.2f}s",
-                            f"{median:.2f}s",
-                            f"{q3:.2f}s",
-                            f"{iqr:.2f}s",
-                            f"{mean_no_outliers:.2f}s",
+                            self.format_seconds_to_hms(q1),
+                            self.format_seconds_to_hms(median),
+                            self.format_seconds_to_hms(q3),
+                            self.format_seconds_to_hms(iqr),
+                            self.format_seconds_to_hms(mean_no_outliers),
                             f"{len(outliers)}"
                         ))
                 
@@ -1120,8 +1132,8 @@ class TimeStudyAnalyzer:
                 f"📊 Estatísticas Gerais:\n"
                 f"• Total de registros analisados: {total_analyzed}\n"
                 f"• Atividades únicas: {unique_activities}\n"
-                f"• Tempo total: {total_time:.2f} segundos ({total_time/60:.1f} minutos)\n"
-                f"• Tempo médio por registro: {avg_time:.2f} segundos\n"
+                f"• Tempo total: {self.format_seconds_to_hms(total_time)}\n"
+                f"• Tempo médio por registro: {self.format_seconds_to_hms(avg_time)}\n"
                 f"• Grupos criados: {len(self.activity_groups)}")
             
         except Exception as e:
