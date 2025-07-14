@@ -1,863 +1,723 @@
+
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox
 import pandas as pd
-import numpy as np
+import sqlite3
+import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import seaborn as sns
+import numpy as np
 from difflib import SequenceMatcher
-import json
-import os
-from datetime import datetime
-import sqlite3
-from pathlib import Path
 
-class TimeStudyApp:
+class TimeStudyAnalyzer:
     def __init__(self, root):
         self.root = root
-        self.root.title("Plataforma de Análise de Estudo de Tempos")
+        self.root.title("Plataforma de Análise de Estudo de Tempos - Desktop")
         self.root.geometry("1200x800")
-        self.root.configure(bg='#f0f0f0')
         
-        # Initialize database
+        # Inicializar banco de dados
         self.init_database()
         
-        # Data storage
+        # Variáveis de estado
         self.uploaded_files = []
-        self.activities = []
-        self.groups = []
-        self.statistics_results = []
+        self.processed_data = None
+        self.activity_column = None
+        self.time_column = None
+        self.unified_activities = {}
+        self.activity_groups = {}
         
-        # Create GUI
-        self.create_widgets()
+        # Criar interface
+        self.create_interface()
         
     def init_database(self):
-        """Initialize SQLite database"""
+        """Inicializa o banco de dados SQLite"""
         self.db_path = "time_study.db"
-        self.conn = sqlite3.connect(self.db_path)
-        cursor = self.conn.cursor()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         
-        # Create tables
+        # Criar tabelas
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT,
-                original_name TEXT,
-                data TEXT,
-                activity_column TEXT,
-                time_column TEXT,
-                processed INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                data TEXT NOT NULL
             )
         ''')
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS activities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                original_names TEXT,
-                occurrences INTEGER,
-                times TEXT,
-                unified INTEGER DEFAULT 0,
-                group_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                unified_name TEXT,
+                group_name TEXT,
+                time_seconds REAL NOT NULL
             )
         ''')
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                color TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT
             )
         ''')
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS statistics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                activity_id INTEGER,
-                group_id INTEGER,
-                count INTEGER,
-                min_val REAL,
-                max_val REAL,
-                median_val REAL,
+                id INTEGER PRIMARY KEY,
+                activity_name TEXT NOT NULL,
+                group_name TEXT,
                 q1 REAL,
+                median REAL,
                 q3 REAL,
                 iqr REAL,
-                upper_fence REAL,
-                lower_fence REAL,
-                outlier_count INTEGER,
-                non_outlier_count INTEGER,
-                overall_mean REAL,
-                non_outlier_mean REAL,
-                total_activity_time REAL,
-                non_normalized_time REAL,
-                normalized_time REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                outliers TEXT,
+                mean_all REAL,
+                mean_no_outliers REAL,
+                total_time REAL
             )
         ''')
         
-        self.conn.commit()
+        conn.commit()
+        conn.close()
         
-    def create_widgets(self):
-        """Create the main GUI widgets"""
-        # Create notebook for tabs
+    def create_interface(self):
+        """Cria a interface principal com abas"""
+        # Criar notebook para abas
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Tab 1: File Upload
-        self.upload_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.upload_frame, text="1. Upload de Arquivos")
+        # Configurar grid weights
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        
+        # Criar abas
         self.create_upload_tab()
-        
-        # Tab 2: Column Mapping
-        self.mapping_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.mapping_frame, text="2. Mapeamento de Colunas")
         self.create_mapping_tab()
-        
-        # Tab 3: Activity Unification
-        self.unification_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.unification_frame, text="3. Unificação de Atividades")
         self.create_unification_tab()
-        
-        # Tab 4: Activity Grouping
-        self.grouping_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.grouping_frame, text="4. Agrupamento de Atividades")
         self.create_grouping_tab()
-        
-        # Tab 5: Statistical Analysis
-        self.analysis_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.analysis_frame, text="5. Análise Estatística")
         self.create_analysis_tab()
-        
-        # Tab 6: Export
-        self.export_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.export_frame, text="6. Exportação")
         self.create_export_tab()
         
     def create_upload_tab(self):
-        """Create file upload tab"""
-        title_label = ttk.Label(self.upload_frame, text="Upload de Arquivos", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de upload de arquivos"""
+        upload_frame = ttk.Frame(self.notebook)
+        self.notebook.add(upload_frame, text="1. Upload de Arquivos")
         
-        instruction_label = ttk.Label(self.upload_frame, text="Selecione arquivos Excel (.xlsx) ou CSV (.csv) contendo dados de estudo de tempos")
-        instruction_label.pack(pady=5)
+        # Configurar grid
+        upload_frame.grid_rowconfigure(1, weight=1)
+        upload_frame.grid_columnconfigure(0, weight=1)
         
-        # Upload button
-        upload_btn = ttk.Button(self.upload_frame, text="Selecionar Arquivos", command=self.upload_files)
-        upload_btn.pack(pady=10)
+        # Título
+        title_label = ttk.Label(upload_frame, text="Upload de Arquivos Excel/CSV", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, pady=10)
         
-        # Files list
-        self.files_listbox = tk.Listbox(self.upload_frame, height=10)
-        self.files_listbox.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Frame para botões
+        button_frame = ttk.Frame(upload_frame)
+        button_frame.grid(row=1, column=0, pady=10)
         
-        # Preview button
-        preview_btn = ttk.Button(self.upload_frame, text="Visualizar Arquivo Selecionado", command=self.preview_file)
-        preview_btn.pack(pady=5)
+        # Botão de upload
+        upload_btn = ttk.Button(button_frame, text="Selecionar Arquivos", command=self.upload_files)
+        upload_btn.grid(row=0, column=0, padx=5)
         
-        # Preview text area
-        self.preview_text = scrolledtext.ScrolledText(self.upload_frame, height=8)
-        self.preview_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Botão de limpar
+        clear_btn = ttk.Button(button_frame, text="Limpar Lista", command=self.clear_files)
+        clear_btn.grid(row=0, column=1, padx=5)
+        
+        # Lista de arquivos
+        list_frame = ttk.Frame(upload_frame)
+        list_frame.grid(row=2, column=0, sticky="nsew", pady=10)
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+        
+        self.file_listbox = tk.Listbox(list_frame)
+        self.file_listbox.grid(row=0, column=0, sticky="nsew")
+        
+        # Scrollbar para lista
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.file_listbox.configure(yscrollcommand=scrollbar.set)
+        
+        # Preview dos dados
+        preview_label = ttk.Label(upload_frame, text="Preview dos Dados:")
+        preview_label.grid(row=3, column=0, sticky="w", pady=(10, 5))
+        
+        preview_frame = ttk.Frame(upload_frame)
+        preview_frame.grid(row=4, column=0, sticky="nsew", pady=5)
+        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
+        
+        # Treeview para preview
+        self.preview_tree = ttk.Treeview(preview_frame)
+        self.preview_tree.grid(row=0, column=0, sticky="nsew")
+        
+        # Scrollbars para preview
+        h_scroll = ttk.Scrollbar(preview_frame, orient="horizontal", command=self.preview_tree.xview)
+        h_scroll.grid(row=1, column=0, sticky="ew")
+        self.preview_tree.configure(xscrollcommand=h_scroll.set)
+        
+        v_scroll = ttk.Scrollbar(preview_frame, orient="vertical", command=self.preview_tree.yview)
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        self.preview_tree.configure(yscrollcommand=v_scroll.set)
+        
+        # Configurar weights para upload_frame
+        upload_frame.grid_rowconfigure(2, weight=1)
+        upload_frame.grid_rowconfigure(4, weight=2)
         
     def create_mapping_tab(self):
-        """Create column mapping tab"""
-        title_label = ttk.Label(self.mapping_frame, text="Mapeamento de Colunas", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de mapeamento de colunas"""
+        mapping_frame = ttk.Frame(self.notebook)
+        self.notebook.add(mapping_frame, text="2. Mapeamento de Colunas")
         
-        instruction_label = ttk.Label(self.mapping_frame, text="Selecione as colunas de atividade e tempo para cada arquivo")
-        instruction_label.pack(pady=5)
+        # Configurar grid
+        mapping_frame.grid_rowconfigure(2, weight=1)
+        mapping_frame.grid_columnconfigure(0, weight=1)
         
-        # Mapping frame
-        mapping_scroll_frame = ttk.Frame(self.mapping_frame)
-        mapping_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Título
+        title_label = ttk.Label(mapping_frame, text="Mapeamento de Colunas", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, pady=10)
         
-        self.mapping_widgets = {}
+        # Frame para seleção
+        selection_frame = ttk.Frame(mapping_frame)
+        selection_frame.grid(row=1, column=0, pady=10)
         
-        # Process button
-        process_btn = ttk.Button(self.mapping_frame, text="Processar Arquivos", command=self.process_files)
-        process_btn.pack(pady=10)
+        # Seleção de coluna de atividade
+        ttk.Label(selection_frame, text="Coluna de Atividade:").grid(row=0, column=0, padx=5, sticky="w")
+        self.activity_combo = ttk.Combobox(selection_frame, state="readonly")
+        self.activity_combo.grid(row=0, column=1, padx=5)
+        
+        # Seleção de coluna de tempo
+        ttk.Label(selection_frame, text="Coluna de Tempo:").grid(row=0, column=2, padx=5, sticky="w")
+        self.time_combo = ttk.Combobox(selection_frame, state="readonly")
+        self.time_combo.grid(row=0, column=3, padx=5)
+        
+        # Botão de processar
+        process_btn = ttk.Button(selection_frame, text="Processar Dados", command=self.process_data)
+        process_btn.grid(row=0, column=4, padx=10)
+        
+        # Preview dos dados processados
+        preview_label = ttk.Label(mapping_frame, text="Dados Processados:")
+        preview_label.grid(row=2, column=0, sticky="w", pady=(10, 5))
+        
+        processed_frame = ttk.Frame(mapping_frame)
+        processed_frame.grid(row=3, column=0, sticky="nsew", pady=5)
+        processed_frame.grid_rowconfigure(0, weight=1)
+        processed_frame.grid_columnconfigure(0, weight=1)
+        
+        self.processed_tree = ttk.Treeview(processed_frame, columns=("Atividade", "Tempo"), show="headings")
+        self.processed_tree.heading("Atividade", text="Atividade")
+        self.processed_tree.heading("Tempo", text="Tempo (segundos)")
+        self.processed_tree.grid(row=0, column=0, sticky="nsew")
+        
+        # Scrollbar
+        processed_scroll = ttk.Scrollbar(processed_frame, orient="vertical", command=self.processed_tree.yview)
+        processed_scroll.grid(row=0, column=1, sticky="ns")
+        self.processed_tree.configure(yscrollcommand=processed_scroll.set)
+        
+        # Configurar weights
+        mapping_frame.grid_rowconfigure(3, weight=1)
         
     def create_unification_tab(self):
-        """Create activity unification tab"""
-        title_label = ttk.Label(self.unification_frame, text="Unificação de Atividades", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de unificação de atividades"""
+        unification_frame = ttk.Frame(self.notebook)
+        self.notebook.add(unification_frame, text="3. Unificação de Atividades")
         
-        instruction_label = ttk.Label(self.unification_frame, text="Revise e aprove sugestões de unificação de atividades similares")
-        instruction_label.pack(pady=5)
+        # Configurar grid
+        unification_frame.grid_rowconfigure(2, weight=1)
+        unification_frame.grid_columnconfigure(0, weight=1)
         
-        # Suggestions frame
-        self.suggestions_frame = ttk.Frame(self.unification_frame)
-        self.suggestions_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Título
+        title_label = ttk.Label(unification_frame, text="Unificação de Atividades Similares", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, pady=10)
         
-        # Apply unification button
-        unify_btn = ttk.Button(self.unification_frame, text="Aplicar Unificações", command=self.apply_unifications)
-        unify_btn.pack(pady=10)
+        # Botão para detectar similaridades
+        detect_btn = ttk.Button(unification_frame, text="Detectar Atividades Similares", command=self.detect_similarities)
+        detect_btn.grid(row=1, column=0, pady=5)
+        
+        # Frame para sugestões
+        suggestions_frame = ttk.Frame(unification_frame)
+        suggestions_frame.grid(row=2, column=0, sticky="nsew", pady=10)
+        suggestions_frame.grid_rowconfigure(0, weight=1)
+        suggestions_frame.grid_columnconfigure(0, weight=1)
+        
+        self.similarity_tree = ttk.Treeview(suggestions_frame, columns=("Atividades", "Similaridade", "Ação"), show="headings")
+        self.similarity_tree.heading("Atividades", text="Atividades Similares")
+        self.similarity_tree.heading("Similaridade", text="% Similaridade")
+        self.similarity_tree.heading("Ação", text="Ação")
+        self.similarity_tree.grid(row=0, column=0, sticky="nsew")
+        
+        # Scrollbar
+        similarity_scroll = ttk.Scrollbar(suggestions_frame, orient="vertical", command=self.similarity_tree.yview)
+        similarity_scroll.grid(row=0, column=1, sticky="ns")
+        self.similarity_tree.configure(yscrollcommand=similarity_scroll.set)
+        
+        # Frame para botões de ação
+        action_frame = ttk.Frame(unification_frame)
+        action_frame.grid(row=3, column=0, pady=5)
+        
+        unify_btn = ttk.Button(action_frame, text="Unificar Selecionadas", command=self.unify_activities)
+        unify_btn.grid(row=0, column=0, padx=5)
+        
+        skip_btn = ttk.Button(action_frame, text="Pular Selecionadas", command=self.skip_activities)
+        skip_btn.grid(row=0, column=1, padx=5)
         
     def create_grouping_tab(self):
-        """Create activity grouping tab"""
-        title_label = ttk.Label(self.grouping_frame, text="Agrupamento de Atividades", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de agrupamento de atividades"""
+        grouping_frame = ttk.Frame(self.notebook)
+        self.notebook.add(grouping_frame, text="4. Agrupamento")
         
-        # Group creation frame
-        group_creation_frame = ttk.LabelFrame(self.grouping_frame, text="Criar Novo Grupo")
-        group_creation_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Configurar grid
+        grouping_frame.grid_rowconfigure(1, weight=1)
+        grouping_frame.grid_columnconfigure(0, weight=1)
+        grouping_frame.grid_columnconfigure(1, weight=1)
         
-        ttk.Label(group_creation_frame, text="Nome do Grupo:").pack(side=tk.LEFT, padx=5)
-        self.group_name_entry = ttk.Entry(group_creation_frame, width=30)
-        self.group_name_entry.pack(side=tk.LEFT, padx=5)
+        # Título
+        title_label = ttk.Label(grouping_frame, text="Agrupamento de Atividades", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=2, pady=10)
         
-        create_group_btn = ttk.Button(group_creation_frame, text="Criar Grupo", command=self.create_group)
-        create_group_btn.pack(side=tk.LEFT, padx=5)
+        # Frame esquerdo - Atividades disponíveis
+        left_frame = ttk.LabelFrame(grouping_frame, text="Atividades Disponíveis")
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        left_frame.grid_rowconfigure(0, weight=1)
+        left_frame.grid_columnconfigure(0, weight=1)
         
-        # Main grouping frame
-        main_grouping_frame = ttk.Frame(self.grouping_frame)
-        main_grouping_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.available_listbox = tk.Listbox(left_frame, selectmode=tk.MULTIPLE)
+        self.available_listbox.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
-        # Activities list
-        activities_frame = ttk.LabelFrame(main_grouping_frame, text="Atividades")
-        activities_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        # Frame direito - Grupos
+        right_frame = ttk.LabelFrame(grouping_frame, text="Grupos")
+        right_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 0), pady=5)
+        right_frame.grid_rowconfigure(1, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
         
-        self.activities_listbox = tk.Listbox(activities_frame, selectmode=tk.MULTIPLE)
-        self.activities_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Botões para grupos
+        group_btn_frame = ttk.Frame(right_frame)
+        group_btn_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         
-        # Groups list
-        groups_frame = ttk.LabelFrame(main_grouping_frame, text="Grupos")
-        groups_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        new_group_btn = ttk.Button(group_btn_frame, text="Novo Grupo", command=self.create_new_group)
+        new_group_btn.grid(row=0, column=0, padx=2)
         
-        self.groups_listbox = tk.Listbox(groups_frame)
-        self.groups_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        add_to_group_btn = ttk.Button(group_btn_frame, text="Adicionar ao Grupo", command=self.add_to_group)
+        add_to_group_btn.grid(row=0, column=1, padx=2)
         
-        # Assign button
-        assign_btn = ttk.Button(self.grouping_frame, text="Atribuir Atividades ao Grupo Selecionado", command=self.assign_to_group)
-        assign_btn.pack(pady=10)
+        # Tree para grupos
+        self.group_tree = ttk.Treeview(right_frame)
+        self.group_tree.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        
+        group_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=self.group_tree.yview)
+        group_scroll.grid(row=1, column=1, sticky="ns")
+        self.group_tree.configure(yscrollcommand=group_scroll.set)
         
     def create_analysis_tab(self):
-        """Create statistical analysis tab"""
-        title_label = ttk.Label(self.analysis_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de análise estatística"""
+        analysis_frame = ttk.Frame(self.notebook)
+        self.notebook.add(analysis_frame, text="5. Análise Estatística")
         
-        # Calculate statistics button
-        calc_btn = ttk.Button(self.analysis_frame, text="Calcular Estatísticas", command=self.calculate_statistics)
-        calc_btn.pack(pady=10)
+        # Configurar grid
+        analysis_frame.grid_rowconfigure(1, weight=1)
+        analysis_frame.grid_columnconfigure(0, weight=1)
+        analysis_frame.grid_columnconfigure(1, weight=1)
         
-        # Results frame
-        results_frame = ttk.Frame(self.analysis_frame)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Título
+        title_label = ttk.Label(analysis_frame, text="Análise Estatística", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=2, pady=10)
         
-        # Statistics table
-        self.stats_tree = ttk.Treeview(results_frame, columns=('Tipo', 'Nome', 'Contagem', 'Média', 'Mediana', 'Q1', 'Q3', 'IQR'), show='headings')
-        self.stats_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Botão de análise
+        analyze_btn = ttk.Button(analysis_frame, text="Executar Análise", command=self.perform_analysis)
+        analyze_btn.grid(row=0, column=1, sticky="e", padx=10)
         
-        # Configure columns
-        for col in self.stats_tree['columns']:
-            self.stats_tree.heading(col, text=col)
-            self.stats_tree.column(col, width=100)
+        # Frame esquerdo - Tabela de resultados
+        left_frame = ttk.LabelFrame(analysis_frame, text="Resultados Estatísticos")
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        left_frame.grid_rowconfigure(0, weight=1)
+        left_frame.grid_columnconfigure(0, weight=1)
         
-        # Scrollbar for treeview
-        stats_scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.stats_tree.yview)
-        stats_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.stats_tree.configure(yscrollcommand=stats_scrollbar.set)
+        self.results_tree = ttk.Treeview(left_frame, columns=("Q1", "Mediana", "Q3", "IQR", "Média", "Outliers"), show="tree headings")
+        self.results_tree.heading("#0", text="Atividade/Grupo")
+        self.results_tree.heading("Q1", text="Q1")
+        self.results_tree.heading("Mediana", text="Mediana")
+        self.results_tree.heading("Q3", text="Q3")
+        self.results_tree.heading("IQR", text="IQR")
+        self.results_tree.heading("Média", text="Média")
+        self.results_tree.heading("Outliers", text="Outliers")
+        self.results_tree.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
-        # Plot frame
-        self.plot_frame = ttk.Frame(self.analysis_frame)
-        self.plot_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        results_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=self.results_tree.yview)
+        results_scroll.grid(row=0, column=1, sticky="ns")
+        self.results_tree.configure(yscrollcommand=results_scroll.set)
+        
+        # Frame direito - Gráficos
+        right_frame = ttk.LabelFrame(analysis_frame, text="Visualizações")
+        right_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 0), pady=5)
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+        
+        # Frame para matplotlib
+        self.plot_frame = ttk.Frame(right_frame)
+        self.plot_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.plot_frame.grid_rowconfigure(0, weight=1)
+        self.plot_frame.grid_columnconfigure(0, weight=1)
         
     def create_export_tab(self):
-        """Create export tab"""
-        title_label = ttk.Label(self.export_frame, text="Exportação de Resultados", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        """Aba de exportação"""
+        export_frame = ttk.Frame(self.notebook)
+        self.notebook.add(export_frame, text="6. Exportação")
         
-        instruction_label = ttk.Label(self.export_frame, text="Exporte os resultados da análise para arquivo Excel")
-        instruction_label.pack(pady=5)
+        # Configurar grid
+        export_frame.grid_rowconfigure(1, weight=1)
+        export_frame.grid_columnconfigure(0, weight=1)
         
-        export_btn = ttk.Button(self.export_frame, text="Exportar para Excel", command=self.export_to_excel)
-        export_btn.pack(pady=20)
+        # Título
+        title_label = ttk.Label(export_frame, text="Exportação de Resultados", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, pady=10)
         
-        # Export status
-        self.export_status_label = ttk.Label(self.export_frame, text="")
-        self.export_status_label.pack(pady=10)
+        # Frame para opções
+        options_frame = ttk.Frame(export_frame)
+        options_frame.grid(row=1, column=0, pady=20)
+        
+        # Botão de exportar Excel
+        export_excel_btn = ttk.Button(options_frame, text="Exportar para Excel", command=self.export_to_excel)
+        export_excel_btn.grid(row=0, column=0, padx=10, pady=10)
+        
+        # Botão de exportar CSV
+        export_csv_btn = ttk.Button(options_frame, text="Exportar para CSV", command=self.export_to_csv)
+        export_csv_btn.grid(row=0, column=1, padx=10, pady=10)
+        
+        # Label de status
+        self.export_status = ttk.Label(export_frame, text="Pronto para exportar")
+        self.export_status.grid(row=2, column=0, pady=10)
         
     def upload_files(self):
-        """Handle file upload"""
-        file_paths = filedialog.askopenfilenames(
-            title="Selecionar Arquivos",
-            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All files", "*.*")]
+        """Função para upload de arquivos"""
+        filetypes = [
+            ("Arquivos Excel", "*.xlsx"),
+            ("Arquivos CSV", "*.csv"),
+            ("Todos os arquivos", "*.*")
+        ]
+        
+        files = filedialog.askopenfilenames(
+            title="Selecionar arquivos",
+            filetypes=filetypes
         )
         
-        for file_path in file_paths:
-            try:
-                # Read file
-                if file_path.endswith('.xlsx'):
-                    df = pd.read_excel(file_path)
-                elif file_path.endswith('.csv'):
-                    df = pd.read_csv(file_path)
-                else:
-                    continue
-                
-                # Store in database
+        for file_path in files:
+            if file_path not in self.uploaded_files:
+                self.uploaded_files.append(file_path)
                 filename = os.path.basename(file_path)
-                data_json = df.to_json()
+                self.file_listbox.insert(tk.END, filename)
                 
-                cursor = self.conn.cursor()
-                cursor.execute('''
-                    INSERT INTO files (filename, original_name, data)
-                    VALUES (?, ?, ?)
-                ''', (filename, filename, data_json))
-                self.conn.commit()
-                
-                # Add to listbox
-                self.files_listbox.insert(tk.END, filename)
-                
-                # Update mapping tab
-                self.update_mapping_tab()
-                
-            except Exception as e:
-                messagebox.showerror("Erro", f"Erro ao carregar arquivo {file_path}: {str(e)}")
-    
-    def preview_file(self):
-        """Preview selected file"""
-        selection = self.files_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Aviso", "Selecione um arquivo para visualizar")
+        self.update_preview()
+        self.update_column_combos()
+        
+    def clear_files(self):
+        """Limpar lista de arquivos"""
+        self.uploaded_files.clear()
+        self.file_listbox.delete(0, tk.END)
+        self.clear_preview()
+        
+    def update_preview(self):
+        """Atualizar preview dos dados"""
+        if not self.uploaded_files:
+            self.clear_preview()
             return
-        
-        filename = self.files_listbox.get(selection[0])
-        
-        # Get file data from database
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT data FROM files WHERE filename = ?', (filename,))
-        result = cursor.fetchone()
-        
-        if result:
-            df = pd.read_json(result[0])
-            preview_text = f"Arquivo: {filename}\n"
-            preview_text += f"Linhas: {len(df)}, Colunas: {len(df.columns)}\n\n"
-            preview_text += f"Colunas: {', '.join(df.columns)}\n\n"
-            preview_text += "Primeiras 5 linhas:\n"
-            preview_text += df.head().to_string()
             
-            self.preview_text.delete(1.0, tk.END)
-            self.preview_text.insert(1.0, preview_text)
-    
-    def update_mapping_tab(self):
-        """Update column mapping tab with uploaded files"""
-        # Clear existing widgets
-        for widget in self.mapping_widgets.values():
-            for w in widget:
-                w.destroy()
-        self.mapping_widgets.clear()
-        
-        # Get files from database
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id, filename, data, processed FROM files')
-        files = cursor.fetchall()
-        
-        row = 0
-        for file_id, filename, data_json, processed in files:
-            df = pd.read_json(data_json)
-            columns = df.columns.tolist()
-            
-            # File label
-            file_label = ttk.Label(self.mapping_frame, text=f"Arquivo: {filename}", font=("Arial", 12, "bold"))
-            file_label.grid(row=row, column=0, columnspan=4, sticky=tk.W, padx=20, pady=(10, 5))
-            
-            # Activity column
-            ttk.Label(self.mapping_frame, text="Coluna de Atividade:").grid(row=row+1, column=0, padx=20, pady=2, sticky=tk.W)
-            activity_combo = ttk.Combobox(self.mapping_frame, values=columns, width=20)
-            activity_combo.grid(row=row+1, column=1, padx=10, pady=2)
-            
-            # Time column
-            ttk.Label(self.mapping_frame, text="Coluna de Tempo:").grid(row=row+1, column=2, padx=20, pady=2, sticky=tk.W)
-            time_combo = ttk.Combobox(self.mapping_frame, values=columns, width=20)
-            time_combo.grid(row=row+1, column=3, padx=10, pady=2)
-            
-            self.mapping_widgets[file_id] = [file_label, activity_combo, time_combo]
-            row += 2
-    
-    def process_files(self):
-        """Process files with column mappings"""
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id, filename, data FROM files WHERE processed = 0')
-        files = cursor.fetchall()
-        
-        all_activities = {}
-        
-        for file_id, filename, data_json in files:
-            if file_id not in self.mapping_widgets:
-                continue
-            
-            widgets = self.mapping_widgets[file_id]
-            activity_column = widgets[1].get()
-            time_column = widgets[2].get()
-            
-            if not activity_column or not time_column:
-                messagebox.showwarning("Aviso", f"Selecione as colunas para o arquivo {filename}")
-                continue
-            
-            # Update file with column mapping
-            cursor.execute('''
-                UPDATE files SET activity_column = ?, time_column = ?, processed = 1
-                WHERE id = ?
-            ''', (activity_column, time_column, file_id))
-            
-            # Extract activities
-            df = pd.read_json(data_json)
-            for _, row in df.iterrows():
-                activity_name = str(row[activity_column])
-                time_value = float(row[time_column]) if pd.notna(row[time_column]) else 0
-                
-                if activity_name in all_activities:
-                    all_activities[activity_name].append(time_value)
-                else:
-                    all_activities[activity_name] = [time_value]
-        
-        # Store activities in database
-        for activity_name, times in all_activities.items():
-            times_json = json.dumps(times)
-            cursor.execute('''
-                INSERT INTO activities (name, original_names, occurrences, times)
-                VALUES (?, ?, ?, ?)
-            ''', (activity_name, json.dumps([activity_name]), len(times), times_json))
-        
-        self.conn.commit()
-        
-        # Update unification tab
-        self.update_unification_tab()
-        
-        messagebox.showinfo("Sucesso", "Arquivos processados com sucesso!")
-    
-    def update_unification_tab(self):
-        """Update unification tab with similarity suggestions"""
-        # Clear existing widgets
-        for widget in self.suggestions_frame.winfo_children():
-            widget.destroy()
-        
-        # Get activities from database
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT name FROM activities WHERE unified = 0')
-        activity_names = [row[0] for row in cursor.fetchall()]
-        
-        # Find similar activities
-        suggestions = self.find_similar_activities(activity_names)
-        
-        if not suggestions:
-            ttk.Label(self.suggestions_frame, text="Nenhuma sugestão de unificação encontrada").pack(pady=20)
-            return
-        
-        # Create suggestion widgets
-        self.unification_vars = {}
-        row = 0
-        
-        for suggestion in suggestions:
-            frame = ttk.LabelFrame(self.suggestions_frame, text=f"Sugestão {row + 1}")
-            frame.pack(fill=tk.X, padx=10, pady=5)
-            
-            # Activities list
-            activities_text = "Atividades similares:\n" + "\n".join(suggestion['activities'])
-            ttk.Label(frame, text=activities_text).pack(anchor=tk.W, padx=10, pady=5)
-            
-            # Checkbox to accept
-            var = tk.BooleanVar()
-            checkbox = ttk.Checkbutton(frame, text="Aceitar unificação", variable=var)
-            checkbox.pack(anchor=tk.W, padx=10, pady=2)
-            
-            # Unified name entry
-            ttk.Label(frame, text="Nome unificado:").pack(anchor=tk.W, padx=10, pady=(5, 0))
-            unified_entry = ttk.Entry(frame, width=40)
-            unified_entry.pack(anchor=tk.W, padx=10, pady=(0, 5))
-            unified_entry.insert(0, suggestion['activities'][0])  # Default to first activity name
-            
-            self.unification_vars[row] = {
-                'var': var,
-                'entry': unified_entry,
-                'activities': suggestion['activities']
-            }
-            row += 1
-    
-    def find_similar_activities(self, activity_names, threshold=0.8):
-        """Find similar activity names"""
-        suggestions = []
-        processed = set()
-        
-        for i, name1 in enumerate(activity_names):
-            if name1 in processed:
-                continue
-            
-            similar_group = [name1]
-            for j, name2 in enumerate(activity_names):
-                if i != j and name2 not in processed:
-                    similarity = SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
-                    if similarity >= threshold:
-                        similar_group.append(name2)
-                        processed.add(name2)
-            
-            if len(similar_group) > 1:
-                suggestions.append({'activities': similar_group})
-                processed.add(name1)
-        
-        return suggestions
-    
-    def apply_unifications(self):
-        """Apply selected unifications"""
-        cursor = self.conn.cursor()
-        
-        for suggestion_data in self.unification_vars.values():
-            if suggestion_data['var'].get():  # If checkbox is checked
-                unified_name = suggestion_data['entry'].get()
-                activities = suggestion_data['activities']
-                
-                if not unified_name:
-                    continue
-                
-                # Merge activities
-                all_times = []
-                original_names = []
-                
-                for activity_name in activities:
-                    cursor.execute('SELECT times, original_names FROM activities WHERE name = ?', (activity_name,))
-                    result = cursor.fetchone()
-                    if result:
-                        times = json.loads(result[0])
-                        orig_names = json.loads(result[1])
-                        all_times.extend(times)
-                        original_names.extend(orig_names)
-                
-                # Update first activity with merged data
-                first_activity = activities[0]
-                cursor.execute('''
-                    UPDATE activities 
-                    SET name = ?, original_names = ?, occurrences = ?, times = ?, unified = 1
-                    WHERE name = ?
-                ''', (unified_name, json.dumps(original_names), len(all_times), json.dumps(all_times), first_activity))
-                
-                # Delete other activities
-                for activity_name in activities[1:]:
-                    cursor.execute('DELETE FROM activities WHERE name = ?', (activity_name,))
-        
-        self.conn.commit()
-        self.update_grouping_tab()
-        messagebox.showinfo("Sucesso", "Unificações aplicadas com sucesso!")
-    
-    def update_grouping_tab(self):
-        """Update grouping tab with activities and groups"""
-        # Clear activities listbox
-        self.activities_listbox.delete(0, tk.END)
-        
-        # Get activities from database
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT name FROM activities')
-        activities = cursor.fetchall()
-        
-        for activity in activities:
-            self.activities_listbox.insert(tk.END, activity[0])
-        
-        # Update groups listbox
-        self.update_groups_listbox()
-    
-    def update_groups_listbox(self):
-        """Update groups listbox"""
-        self.groups_listbox.delete(0, tk.END)
-        
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT name FROM groups')
-        groups = cursor.fetchall()
-        
-        for group in groups:
-            self.groups_listbox.insert(tk.END, group[0])
-    
-    def create_group(self):
-        """Create a new group"""
-        group_name = self.group_name_entry.get().strip()
-        if not group_name:
-            messagebox.showwarning("Aviso", "Digite um nome para o grupo")
-            return
-        
-        cursor = self.conn.cursor()
-        cursor.execute('INSERT INTO groups (name, color) VALUES (?, ?)', (group_name, '#3498db'))
-        self.conn.commit()
-        
-        self.group_name_entry.delete(0, tk.END)
-        self.update_groups_listbox()
-        messagebox.showinfo("Sucesso", f"Grupo '{group_name}' criado com sucesso!")
-    
-    def assign_to_group(self):
-        """Assign selected activities to selected group"""
-        selected_activities = [self.activities_listbox.get(i) for i in self.activities_listbox.curselection()]
-        selected_group = self.groups_listbox.curselection()
-        
-        if not selected_activities:
-            messagebox.showwarning("Aviso", "Selecione pelo menos uma atividade")
-            return
-        
-        if not selected_group:
-            messagebox.showwarning("Aviso", "Selecione um grupo")
-            return
-        
-        group_name = self.groups_listbox.get(selected_group[0])
-        
-        # Get group ID
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM groups WHERE name = ?', (group_name,))
-        group_id = cursor.fetchone()[0]
-        
-        # Update activities
-        for activity_name in selected_activities:
-            cursor.execute('UPDATE activities SET group_id = ? WHERE name = ?', (group_id, activity_name))
-        
-        self.conn.commit()
-        messagebox.showinfo("Sucesso", f"Atividades atribuídas ao grupo '{group_name}' com sucesso!")
-    
-    def calculate_statistics(self):
-        """Calculate statistics for activities and groups"""
-        cursor = self.conn.cursor()
-        
-        # Clear previous statistics
-        cursor.execute('DELETE FROM statistics')
-        
-        # Calculate for individual activities
-        cursor.execute('SELECT id, name, times, group_id FROM activities')
-        activities = cursor.fetchall()
-        
-        for activity_id, name, times_json, group_id in activities:
-            times = json.loads(times_json)
-            if times:
-                stats = self.calculate_time_statistics(times)
-                cursor.execute('''
-                    INSERT INTO statistics (
-                        activity_id, group_id, count, min_val, max_val, median_val,
-                        q1, q3, iqr, upper_fence, lower_fence, outlier_count,
-                        non_outlier_count, overall_mean, non_outlier_mean,
-                        total_activity_time, non_normalized_time, normalized_time
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (activity_id, group_id, *stats.values()))
-        
-        # Calculate for groups
-        cursor.execute('SELECT id, name FROM groups')
-        groups = cursor.fetchall()
-        
-        for group_id, group_name in groups:
-            cursor.execute('SELECT times FROM activities WHERE group_id = ?', (group_id,))
-            group_activities = cursor.fetchall()
-            
-            all_times = []
-            for times_json, in group_activities:
-                times = json.loads(times_json)
-                all_times.extend(times)
-            
-            if all_times:
-                stats = self.calculate_time_statistics(all_times)
-                cursor.execute('''
-                    INSERT INTO statistics (
-                        activity_id, group_id, count, min_val, max_val, median_val,
-                        q1, q3, iqr, upper_fence, lower_fence, outlier_count,
-                        non_outlier_count, overall_mean, non_outlier_mean,
-                        total_activity_time, non_normalized_time, normalized_time
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (None, group_id, *stats.values()))
-        
-        self.conn.commit()
-        self.update_statistics_display()
-        self.create_box_plots()
-        messagebox.showinfo("Sucesso", "Estatísticas calculadas com sucesso!")
-    
-    def calculate_time_statistics(self, times):
-        """Calculate comprehensive statistics for time data"""
-        times = np.array(times)
-        times = times[~np.isnan(times)]  # Remove NaN values
-        
-        if len(times) == 0:
-            return {
-                'count': 0, 'min_val': 0, 'max_val': 0, 'median_val': 0,
-                'q1': 0, 'q3': 0, 'iqr': 0, 'upper_fence': 0, 'lower_fence': 0,
-                'outlier_count': 0, 'non_outlier_count': 0, 'overall_mean': 0,
-                'non_outlier_mean': 0, 'total_activity_time': 0,
-                'non_normalized_time': 0, 'normalized_time': 0
-            }
-        
-        # Basic statistics
-        count = len(times)
-        min_val = np.min(times)
-        max_val = np.max(times)
-        median_val = np.median(times)
-        q1 = np.percentile(times, 25)
-        q3 = np.percentile(times, 75)
-        iqr = q3 - q1
-        
-        # Outlier detection
-        lower_fence = q1 - 1.5 * iqr
-        upper_fence = q3 + 1.5 * iqr
-        outliers = times[(times < lower_fence) | (times > upper_fence)]
-        non_outliers = times[(times >= lower_fence) & (times <= upper_fence)]
-        
-        outlier_count = len(outliers)
-        non_outlier_count = len(non_outliers)
-        
-        # Means
-        overall_mean = np.mean(times)
-        non_outlier_mean = np.mean(non_outliers) if len(non_outliers) > 0 else 0
-        
-        # Time calculations
-        total_activity_time = np.sum(times)
-        non_normalized_time = total_activity_time  # in seconds
-        normalized_time = total_activity_time / 60  # in minutes
-        
-        return {
-            'count': count,
-            'min_val': min_val,
-            'max_val': max_val,
-            'median_val': median_val,
-            'q1': q1,
-            'q3': q3,
-            'iqr': iqr,
-            'upper_fence': upper_fence,
-            'lower_fence': lower_fence,
-            'outlier_count': outlier_count,
-            'non_outlier_count': non_outlier_count,
-            'overall_mean': overall_mean,
-            'non_outlier_mean': non_outlier_mean,
-            'total_activity_time': total_activity_time,
-            'non_normalized_time': non_normalized_time,
-            'normalized_time': normalized_time
-        }
-    
-    def update_statistics_display(self):
-        """Update statistics display in treeview"""
-        # Clear existing items
-        for item in self.stats_tree.get_children():
-            self.stats_tree.delete(item)
-        
-        cursor = self.conn.cursor()
-        
-        # Get statistics with activity and group names
-        cursor.execute('''
-            SELECT s.*, a.name as activity_name, g.name as group_name
-            FROM statistics s
-            LEFT JOIN activities a ON s.activity_id = a.id
-            LEFT JOIN groups g ON s.group_id = g.id
-            ORDER BY s.group_id, s.activity_id
-        ''')
-        
-        statistics = cursor.fetchall()
-        
-        for stat in statistics:
-            if stat[1]:  # activity_id exists
-                tipo = "ATIVIDADE"
-                nome = stat[19]  # activity_name
-            else:
-                tipo = "GRUPO"
-                nome = stat[20]  # group_name
-            
-            self.stats_tree.insert('', tk.END, values=(
-                tipo, nome, stat[3], f"{stat[14]:.2f}", f"{stat[6]:.2f}",
-                f"{stat[7]:.2f}", f"{stat[8]:.2f}", f"{stat[9]:.2f}"
-            ))
-    
-    def create_box_plots(self):
-        """Create box plots for visualization"""
-        # Clear existing plots
-        for widget in self.plot_frame.winfo_children():
-            widget.destroy()
-        
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT name, times FROM activities')
-        activities = cursor.fetchall()
-        
-        if not activities:
-            return
-        
-        # Create matplotlib figure
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        data = []
-        labels = []
-        
-        for name, times_json in activities:
-            times = json.loads(times_json)
-            if times:
-                data.append(times)
-                labels.append(name[:20])  # Truncate long names
-        
-        if data:
-            box_plot = ax.boxplot(data, labels=labels, patch_artist=True)
-            
-            # Customize colors
-            colors = plt.cm.Set3(np.linspace(0, 1, len(data)))
-            for patch, color in zip(box_plot['boxes'], colors):
-                patch.set_facecolor(color)
-            
-            ax.set_title('Distribuição de Tempos por Atividade')
-            ax.set_ylabel('Tempo (segundos)')
-            ax.set_xlabel('Atividades')
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            
-            # Embed plot in tkinter
-            canvas = FigureCanvasTkAgg(fig, self.plot_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
-    def export_to_excel(self):
-        """Export results to Excel file"""
-        file_path = filedialog.asksaveasfilename(
-            title="Salvar Arquivo Excel",
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx")]
-        )
-        
-        if not file_path:
-            return
-        
         try:
-            cursor = self.conn.cursor()
+            # Ler primeiro arquivo para preview
+            file_path = self.uploaded_files[0]
+            if file_path.endswith('.xlsx'):
+                df = pd.read_excel(file_path)
+            else:
+                df = pd.read_csv(file_path)
+                
+            # Limpar preview anterior
+            self.clear_preview()
             
-            # Get comprehensive data
-            cursor.execute('''
-                SELECT 
-                    CASE WHEN s.activity_id IS NULL THEN 'GRUPO' ELSE 'ATIVIDADE' END as tipo,
-                    COALESCE(a.name, g.name) as nome,
-                    COALESCE(g.name, 'SEM GRUPO') as grupo,
-                    s.count, s.min_val, s.max_val, s.median_val,
-                    s.q1, s.q3, s.iqr, s.upper_fence, s.lower_fence,
-                    s.outlier_count, s.non_outlier_count, s.overall_mean,
-                    s.non_outlier_mean, s.total_activity_time,
-                    s.non_normalized_time, s.normalized_time
-                FROM statistics s
-                LEFT JOIN activities a ON s.activity_id = a.id
-                LEFT JOIN groups g ON s.group_id = g.id
-                ORDER BY g.name, a.name
-            ''')
+            # Configurar colunas
+            self.preview_tree["columns"] = list(df.columns)
+            self.preview_tree["show"] = "headings"
             
-            data = cursor.fetchall()
+            for col in df.columns:
+                self.preview_tree.heading(col, text=col)
+                self.preview_tree.column(col, width=100)
+                
+            # Adicionar dados (primeiras 10 linhas)
+            for index, row in df.head(10).iterrows():
+                self.preview_tree.insert("", tk.END, values=list(row))
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao ler arquivo: {str(e)}")
             
-            # Create DataFrame
-            columns = [
-                'Tipo', 'Nome', 'Grupo', 'Contagem', 'Mínimo', 'Máximo', 'Mediana',
-                'Q1', 'Q3', 'IQR', 'Limite Superior', 'Limite Inferior',
-                'Outliers', 'Não-Outliers', 'Média Geral', 'Média Sem Outliers',
-                'Tempo Total', 'Tempo Não Normalizado', 'Tempo Normalizado'
-            ]
+    def clear_preview(self):
+        """Limpar preview"""
+        for item in self.preview_tree.get_children():
+            self.preview_tree.delete(item)
             
-            df = pd.DataFrame(data, columns=columns)
+    def update_column_combos(self):
+        """Atualizar comboboxes de colunas"""
+        if not self.uploaded_files:
+            return
             
-            # Export to Excel
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Análise Estatística', index=False)
-            
-            self.export_status_label.config(text=f"Arquivo exportado com sucesso: {file_path}")
-            messagebox.showinfo("Sucesso", f"Arquivo exportado com sucesso!\n{file_path}")
+        try:
+            file_path = self.uploaded_files[0]
+            if file_path.endswith('.xlsx'):
+                df = pd.read_excel(file_path)
+            else:
+                df = pd.read_csv(file_path)
+                
+            columns = list(df.columns)
+            self.activity_combo['values'] = columns
+            self.time_combo['values'] = columns
             
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao exportar arquivo: {str(e)}")
-    
-    def __del__(self):
-        """Close database connection"""
-        if hasattr(self, 'conn'):
-            self.conn.close()
+            messagebox.showerror("Erro", f"Erro ao ler colunas: {str(e)}")
+            
+    def process_data(self):
+        """Processar dados dos arquivos"""
+        if not self.uploaded_files:
+            messagebox.showwarning("Aviso", "Nenhum arquivo selecionado")
+            return
+            
+        if not self.activity_combo.get() or not self.time_combo.get():
+            messagebox.showwarning("Aviso", "Selecione as colunas de atividade e tempo")
+            return
+            
+        try:
+            all_data = []
+            
+            for file_path in self.uploaded_files:
+                if file_path.endswith('.xlsx'):
+                    df = pd.read_excel(file_path)
+                else:
+                    df = pd.read_csv(file_path)
+                    
+                # Extrair colunas selecionadas
+                activity_col = self.activity_combo.get()
+                time_col = self.time_combo.get()
+                
+                if activity_col in df.columns and time_col in df.columns:
+                    data = df[[activity_col, time_col]].copy()
+                    data.columns = ['Atividade', 'Tempo']
+                    all_data.append(data)
+                    
+            if all_data:
+                self.processed_data = pd.concat(all_data, ignore_index=True)
+                
+                # Limpar dados nulos e converter tempo para numérico
+                self.processed_data = self.processed_data.dropna()
+                self.processed_data['Tempo'] = pd.to_numeric(self.processed_data['Tempo'], errors='coerce')
+                self.processed_data = self.processed_data.dropna()
+                
+                self.update_processed_preview()
+                self.update_available_activities()
+                messagebox.showinfo("Sucesso", f"Dados processados: {len(self.processed_data)} registros")
+            else:
+                messagebox.showerror("Erro", "Nenhum dado válido encontrado")
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao processar dados: {str(e)}")
+            
+    def update_processed_preview(self):
+        """Atualizar preview dos dados processados"""
+        for item in self.processed_tree.get_children():
+            self.processed_tree.delete(item)
+            
+        if self.processed_data is not None:
+            for index, row in self.processed_data.head(20).iterrows():
+                self.processed_tree.insert("", tk.END, values=(row['Atividade'], f"{row['Tempo']:.2f}"))
+                
+    def update_available_activities(self):
+        """Atualizar lista de atividades disponíveis"""
+        self.available_listbox.delete(0, tk.END)
+        
+        if self.processed_data is not None:
+            unique_activities = self.processed_data['Atividade'].unique()
+            for activity in sorted(unique_activities):
+                self.available_listbox.insert(tk.END, activity)
+                
+    def detect_similarities(self):
+        """Detectar atividades similares"""
+        if self.processed_data is None:
+            messagebox.showwarning("Aviso", "Processe os dados primeiro")
+            return
+            
+        # Limpar árvore de similaridades
+        for item in self.similarity_tree.get_children():
+            self.similarity_tree.delete(item)
+            
+        unique_activities = list(self.processed_data['Atividade'].unique())
+        similarities = []
+        
+        for i, activity1 in enumerate(unique_activities):
+            for j, activity2 in enumerate(unique_activities[i+1:], i+1):
+                similarity = self.calculate_similarity(activity1, activity2)
+                if similarity > 0.7:  # Threshold de 70%
+                    similarities.append((activity1, activity2, similarity))
+                    
+        # Adicionar similaridades à árvore
+        for activity1, activity2, similarity in similarities:
+            self.similarity_tree.insert("", tk.END, values=(
+                f"{activity1} ↔ {activity2}",
+                f"{similarity:.1%}",
+                "Pendente"
+            ))
+            
+        if not similarities:
+            messagebox.showinfo("Info", "Nenhuma atividade similar encontrada")
+            
+    def calculate_similarity(self, str1, str2):
+        """Calcular similaridade entre duas strings"""
+        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+        
+    def unify_activities(self):
+        """Unificar atividades selecionadas"""
+        # Implementar lógica de unificação
+        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        
+    def skip_activities(self):
+        """Pular atividades selecionadas"""
+        # Implementar lógica de skip
+        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        
+    def create_new_group(self):
+        """Criar novo grupo"""
+        # Implementar criação de grupo
+        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        
+    def add_to_group(self):
+        """Adicionar atividades ao grupo"""
+        # Implementar adição ao grupo
+        messagebox.showinfo("Info", "Funcionalidade em desenvolvimento")
+        
+    def perform_analysis(self):
+        """Executar análise estatística"""
+        if self.processed_data is None:
+            messagebox.showwarning("Aviso", "Processe os dados primeiro")
+            return
+            
+        try:
+            # Agrupar por atividade
+            grouped = self.processed_data.groupby('Atividade')['Tempo']
+            
+            # Limpar resultados anteriores
+            for item in self.results_tree.get_children():
+                self.results_tree.delete(item)
+                
+            # Calcular estatísticas para cada atividade
+            for activity, times in grouped:
+                q1 = times.quantile(0.25)
+                median = times.median()
+                q3 = times.quantile(0.75)
+                iqr = q3 - q1
+                mean_all = times.mean()
+                
+                # Detectar outliers
+                lower_bound = q1 - 1.5 * iqr
+                upper_bound = q3 + 1.5 * iqr
+                outliers = times[(times < lower_bound) | (times > upper_bound)]
+                
+                # Média sem outliers
+                clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
+                mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
+                
+                # Adicionar à árvore
+                self.results_tree.insert("", tk.END, text=activity, values=(
+                    f"{q1:.2f}",
+                    f"{median:.2f}",
+                    f"{q3:.2f}",
+                    f"{iqr:.2f}",
+                    f"{mean_no_outliers:.2f}",
+                    len(outliers)
+                ))
+                
+            self.create_boxplot()
+            messagebox.showinfo("Sucesso", "Análise estatística concluída")
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro na análise: {str(e)}")
+            
+    def create_boxplot(self):
+        """Criar boxplot dos dados"""
+        try:
+            # Limpar frame anterior
+            for widget in self.plot_frame.winfo_children():
+                widget.destroy()
+                
+            # Criar figura
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            # Preparar dados para boxplot
+            activities = []
+            times_list = []
+            
+            grouped = self.processed_data.groupby('Atividade')['Tempo']
+            for activity, times in grouped:
+                activities.append(activity)
+                times_list.append(times.values)
+                
+            # Criar boxplot
+            ax.boxplot(times_list, labels=activities)
+            ax.set_title('Distribuição de Tempos por Atividade')
+            ax.set_ylabel('Tempo (segundos)')
+            ax.tick_params(axis='x', rotation=45)
+            
+            plt.tight_layout()
+            
+            # Incorporar no tkinter
+            canvas = FigureCanvasTkAgg(fig, self.plot_frame)
+            canvas.draw()
+            canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+            
+        except Exception as e:
+            print(f"Erro ao criar gráfico: {str(e)}")
+            
+    def export_to_excel(self):
+        """Exportar resultados para Excel"""
+        if self.processed_data is None:
+            messagebox.showwarning("Aviso", "Nenhum dado para exportar")
+            return
+            
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")]
+            )
+            
+            if filename:
+                with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                    self.processed_data.to_excel(writer, sheet_name='Dados Processados', index=False)
+                    
+                self.export_status.config(text=f"Exportado para: {filename}")
+                messagebox.showinfo("Sucesso", "Dados exportados com sucesso!")
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar: {str(e)}")
+            
+    def export_to_csv(self):
+        """Exportar resultados para CSV"""
+        if self.processed_data is None:
+            messagebox.showwarning("Aviso", "Nenhum dado para exportar")
+            return
+            
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv")]
+            )
+            
+            if filename:
+                self.processed_data.to_csv(filename, index=False)
+                self.export_status.config(text=f"Exportado para: {filename}")
+                messagebox.showinfo("Sucesso", "Dados exportados com sucesso!")
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar: {str(e)}")
 
 def main():
     root = tk.Tk()
-    app = TimeStudyApp(root)
+    app = TimeStudyAnalyzer(root)
     root.mainloop()
 
 if __name__ == "__main__":
