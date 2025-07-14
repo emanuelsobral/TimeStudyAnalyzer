@@ -344,20 +344,40 @@ class TimeStudyAnalyzer:
         analyze_btn = ttk.Button(header_frame, text="Executar Análise", command=self.perform_analysis)
         analyze_btn.grid(row=0, column=1, sticky="e")
         
-        # Frame esquerdo - Tabela de resultados
+        # Frame da Tabela de resultados
         table_frame = ttk.LabelFrame(analysis_frame, text="Resultados Estatísticos")
         table_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
         
-        self.results_tree = ttk.Treeview(table_frame, columns=("Q1", "Mediana", "Q3", "IQR", "Média", "Outliers"), show="tree headings")
+        # Definir as colunas da tabela
+        cols = (
+            "n", "min", "max", "q1", "median", "q3", "iqr", 
+            "lower_fence", "upper_fence", "outlier_count", "non_outlier_count",
+            "mean_all", "mean_no_outliers", "time_non_norm", "time_norm"
+        )
+        
+        self.results_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings")
+        
+        # Definir os cabeçalhos das colunas e larguras
+        col_headings = {
+            "n": ("N", 40), "min": ("Mínimo", 80), "max": ("Máximo", 80),
+            "q1": ("Q1", 80), "median": ("Mediana", 80), "q3": ("Q3", 80),
+            "iqr": ("IQR", 80), "lower_fence": ("Limite Inf.", 80),
+            "upper_fence": ("Limite Sup.", 80), "outlier_count": ("Outliers", 60),
+            "non_outlier_count": ("Dentro Lim.", 70), "mean_all": ("Média Geral", 80),
+            "mean_no_outliers": ("Média s/ Out.", 80),
+            "time_non_norm": ("T. Não Norm. (min)", 120),
+            "time_norm": ("T. Norm. (min)", 120)
+        }
+        
         self.results_tree.heading("#0", text="Atividade/Grupo")
-        self.results_tree.heading("Q1", text="Q1")
-        self.results_tree.heading("Mediana", text="Mediana")
-        self.results_tree.heading("Q3", text="Q3")
-        self.results_tree.heading("IQR", text="IQR")
-        self.results_tree.heading("Média", text="Média")
-        self.results_tree.heading("Outliers", text="Outliers")
+        self.results_tree.column("#0", width=200, stretch=tk.NO)
+        
+        for col, (heading, width) in col_headings.items():
+            self.results_tree.heading(col, text=heading)
+            self.results_tree.column(col, width=width, anchor="center")
+
         self.results_tree.grid(row=0, column=0, sticky="nsew")
         
         # Scrollbar Vertical
@@ -951,191 +971,99 @@ class TimeStudyAnalyzer:
         except (ValueError, TypeError):
             return "N/A"
 
+    def _calculate_metrics(self, times_series):
+        """Função auxiliar para calcular todas as métricas para uma série de tempos."""
+        if times_series.empty:
+            return None
+
+        # Métricas básicas
+        n = len(times_series)
+        min_time = times_series.min()
+        max_time = times_series.max()
+        q1 = times_series.quantile(0.25)
+        median = times_series.median()
+        q3 = times_series.quantile(0.75)
+        iqr = q3 - q1
+        mean_all = times_series.mean()
+
+        # Outliers
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        outliers = times_series[(times_series < lower_bound) | (times_series > upper_bound)]
+        clean_times = times_series[(times_series >= lower_bound) & (times_series <= upper_bound)]
+        
+        outlier_count = len(outliers)
+        non_outlier_count = len(clean_times)
+        mean_no_outliers = clean_times.mean() if non_outlier_count > 0 else 0
+
+        # Tempos em minutos
+        time_non_norm = mean_all / 60
+        time_norm = mean_no_outliers / 60
+        
+        # Formatação para exibição
+        values = (
+            n,
+            self.format_seconds_to_hms(min_time),
+            self.format_seconds_to_hms(max_time),
+            self.format_seconds_to_hms(q1),
+            self.format_seconds_to_hms(median),
+            self.format_seconds_to_hms(q3),
+            self.format_seconds_to_hms(iqr),
+            self.format_seconds_to_hms(lower_bound),
+            self.format_seconds_to_hms(upper_bound),
+            outlier_count,
+            non_outlier_count,
+            self.format_seconds_to_hms(mean_all),
+            self.format_seconds_to_hms(mean_no_outliers),
+            f"{time_non_norm:.2f} min",
+            f"{time_norm:.2f} min"
+        )
+        return values
+
     def perform_analysis(self):
-        """Executar análise estatística"""
-        if self.processed_data is None:
-            messagebox.showwarning("Aviso", "Processe os dados primeiro")
+        """Executar análise estatística."""
+        if self.processed_data is None or self.processed_data.empty:
+            messagebox.showwarning("Aviso", "Não há dados válidos para analisar. Processe os arquivos primeiro.")
             return
-            
+
         try:
             # Limpar resultados anteriores
             for item in self.results_tree.get_children():
                 self.results_tree.delete(item)
-            
-            # Verificar se há dados para analisar
-            if len(self.processed_data) == 0:
-                messagebox.showwarning("Aviso", "Não há dados válidos para analisar")
-                return
-            
-            total_analyzed = 0
-            
-            # Analisar grupos primeiro (se existirem)
+
+            # Analisar grupos (se existirem)
             if self.activity_groups:
                 for group_name, group_data in self.activity_groups.items():
                     if group_data['activities']:
-                        # Obter dados do grupo
-                        group_times = self.processed_data[
-                            self.processed_data['Atividade'].isin(group_data['activities'])
-                        ]['Tempo']
-                        
-                        if len(group_times) > 0:
-                            total_analyzed += len(group_times)
-                            
-                            # Calcular estatísticas do grupo
-                            q1 = group_times.quantile(0.25)
-                            median = group_times.median()
-                            q3 = group_times.quantile(0.75)
-                            iqr = q3 - q1
-                            mean_all = group_times.mean()
-                            
-                            # Detectar outliers
-                            lower_bound = q1 - 1.5 * iqr
-                            upper_bound = q3 + 1.5 * iqr
-                            outliers = group_times[(group_times < lower_bound) | (group_times > upper_bound)]
-                            
-                            # Média sem outliers
-                            clean_times = group_times[(group_times >= lower_bound) & (group_times <= upper_bound)]
-                            mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
-                            
-                            # Adicionar grupo à árvore
-                            group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name} ({len(group_times)} registros)", values=(
-                                self.format_seconds_to_hms(q1),
-                                self.format_seconds_to_hms(median),
-                                self.format_seconds_to_hms(q3),
-                                self.format_seconds_to_hms(iqr),
-                                self.format_seconds_to_hms(mean_no_outliers),
-                                f"{len(outliers)} outliers"
-                            ))
-                            
+                        group_times = self.processed_data[self.processed_data['Atividade'].isin(group_data['activities'])]['Tempo']
+                        metrics = self._calculate_metrics(group_times)
+                        if metrics:
+                            group_item = self.results_tree.insert("", tk.END, text=f"📁 {group_name}", values=metrics, open=True)
                             # Analisar atividades individuais do grupo
                             for activity in group_data['activities']:
-                                activity_times = self.processed_data[
-                                    self.processed_data['Atividade'] == activity
-                                ]['Tempo']
-                                
-                                if len(activity_times) > 0:
-                                    a_q1 = activity_times.quantile(0.25)
-                                    a_median = activity_times.median()
-                                    a_q3 = activity_times.quantile(0.75)
-                                    a_iqr = a_q3 - a_q1
-                                    a_mean_all = activity_times.mean()
-                                    
-                                    a_lower_bound = a_q1 - 1.5 * a_iqr
-                                    a_upper_bound = a_q3 + 1.5 * a_iqr
-                                    a_outliers = activity_times[(activity_times < a_lower_bound) | (activity_times > a_upper_bound)]
-                                    
-                                    a_clean_times = activity_times[(activity_times >= a_lower_bound) & (activity_times <= a_upper_bound)]
-                                    a_mean_no_outliers = a_clean_times.mean() if len(a_clean_times) > 0 else a_mean_all
-                                    
-                                    # Adicionar atividade como filho do grupo
-                                    self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity} ({len(activity_times)} reg.)", values=(
-                                        self.format_seconds_to_hms(a_q1),
-                                        self.format_seconds_to_hms(a_median),
-                                        self.format_seconds_to_hms(a_q3),
-                                        self.format_seconds_to_hms(a_iqr),
-                                        self.format_seconds_to_hms(a_mean_no_outliers),
-                                        f"{len(a_outliers)}"
-                                    ))
-            
+                                activity_times = self.processed_data[self.processed_data['Atividade'] == activity]['Tempo']
+                                activity_metrics = self._calculate_metrics(activity_times)
+                                if activity_metrics:
+                                    self.results_tree.insert(group_item, tk.END, text=f"  📊 {activity}", values=activity_metrics)
+
             # Analisar atividades não agrupadas
-            grouped_activities = set()
-            for group_data in self.activity_groups.values():
-                grouped_activities.update(group_data['activities'])
-            
-            ungrouped_activities = self.processed_data[
-                ~self.processed_data['Atividade'].isin(grouped_activities)
-            ]
-            
-            if len(ungrouped_activities) > 0:
-                # Adicionar seção de atividades não agrupadas
-                ungrouped_item = self.results_tree.insert("", tk.END, text=f"📋 Atividades Não Agrupadas ({len(ungrouped_activities)} registros)", values=())
-                
-                # Agrupar por atividade
-                grouped = ungrouped_activities.groupby('Atividade')['Tempo']
-                
-                for activity, times in grouped:
-                    if len(times) > 0:
-                        total_analyzed += len(times)
-                        
-                        q1 = times.quantile(0.25)
-                        median = times.median()
-                        q3 = times.quantile(0.75)
-                        iqr = q3 - q1
-                        mean_all = times.mean()
-                        
-                        # Detectar outliers
-                        lower_bound = q1 - 1.5 * iqr
-                        upper_bound = q3 + 1.5 * iqr
-                        outliers = times[(times < lower_bound) | (times > upper_bound)]
-                        
-                        # Média sem outliers
-                        clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
-                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
-                        
-                        # Adicionar à árvore
-                        self.results_tree.insert(ungrouped_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
-                            self.format_seconds_to_hms(q1),
-                            self.format_seconds_to_hms(median),
-                            self.format_seconds_to_hms(q3),
-                            self.format_seconds_to_hms(iqr),
-                            self.format_seconds_to_hms(mean_no_outliers),
-                            f"{len(outliers)}"
-                        ))
-            
-            # Se não há grupos, analisar todas as atividades
-            if not self.activity_groups and len(ungrouped_activities) == 0:
-                # Analisar todas as atividades
-                all_item = self.results_tree.insert("", tk.END, text=f"📊 Todas as Atividades ({len(self.processed_data)} registros)", values=())
-                
-                grouped = self.processed_data.groupby('Atividade')['Tempo']
-                
-                for activity, times in grouped:
-                    if len(times) > 0:
-                        total_analyzed += len(times)
-                        
-                        q1 = times.quantile(0.25)
-                        median = times.median()
-                        q3 = times.quantile(0.75)
-                        iqr = q3 - q1
-                        mean_all = times.mean()
-                        
-                        # Detectar outliers
-                        lower_bound = q1 - 1.5 * iqr
-                        upper_bound = q3 + 1.5 * iqr
-                        outliers = times[(times < lower_bound) | (times > upper_bound)]
-                        
-                        # Média sem outliers
-                        clean_times = times[(times >= lower_bound) & (times <= upper_bound)]
-                        mean_no_outliers = clean_times.mean() if len(clean_times) > 0 else mean_all
-                        
-                        # Adicionar à árvore
-                        self.results_tree.insert(all_item, tk.END, text=f"  📊 {activity} ({len(times)} reg.)", values=(
-                            self.format_seconds_to_hms(q1),
-                            self.format_seconds_to_hms(median),
-                            self.format_seconds_to_hms(q3),
-                            self.format_seconds_to_hms(iqr),
-                            self.format_seconds_to_hms(mean_no_outliers),
-                            f"{len(outliers)}"
-                        ))
-                
-            # Expandir todas as seções
-            for item in self.results_tree.get_children():
-                self.results_tree.item(item, open=True)
-                
-            # Mostrar estatísticas gerais
-            unique_activities = len(self.processed_data['Atividade'].unique())
-            total_time = self.processed_data['Tempo'].sum()
-            avg_time = self.processed_data['Tempo'].mean()
-            
-            messagebox.showinfo("Análise Concluída", 
-                f"Análise estatística concluída com sucesso!\n\n"
-                f"📊 Estatísticas Gerais:\n"
-                f"• Total de registros analisados: {total_analyzed}\n"
-                f"• Atividades únicas: {unique_activities}\n"
-                f"• Tempo total: {self.format_seconds_to_hms(total_time)}\n"
-                f"• Tempo médio por registro: {self.format_seconds_to_hms(avg_time)}\n"
-                f"• Grupos criados: {len(self.activity_groups)}")
-            
+            grouped_activities = {act for group in self.activity_groups.values() for act in group['activities']}
+            ungrouped_df = self.processed_data[~self.processed_data['Atividade'].isin(grouped_activities)]
+
+            if not ungrouped_df.empty:
+                # Criar um nó pai para atividades não agrupadas, se houver grupos.
+                # Se não houver grupos, as atividades são listadas na raiz.
+                parent_item = ""
+                if self.activity_groups:
+                     parent_item = self.results_tree.insert("", tk.END, text="📋 Atividades Não Agrupadas", open=True)
+
+                for activity, times in ungrouped_df.groupby('Atividade')['Tempo']:
+                    metrics = self._calculate_metrics(times)
+                    if metrics:
+                        self.results_tree.insert(parent_item, tk.END, text=f"📊 {activity}", values=metrics)
+
+            messagebox.showinfo("Análise Concluída", "A análise estatística foi concluída com sucesso!")
+
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
