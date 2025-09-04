@@ -1054,20 +1054,55 @@ class TimeStudyAnalyzer:
                                  for group_name, data in self.activity_groups.items()
                                  for activity in data['activities']}
 
-            df_part1 = self.processed_data.copy()
-            df_part1['Processos'] = df_part1['Atividade'].map(activity_to_group).fillna('')
+            df_part1_source = self.processed_data.copy()
+            df_part1_source['Processos'] = df_part1_source['Atividade'].map(activity_to_group).fillna('')
             
             # Agrupar tempos em listas por atividade
-            pivoted_times = df_part1.groupby(['Processos', 'Atividade'])['Tempo'].apply(list).reset_index(name='Tempos')
+            pivoted_times = df_part1_source.groupby(['Processos', 'Atividade'])['Tempo'].apply(list).reset_index(name='Tempos')
             
             # Expandir as listas de tempo em colunas "Amostra N"
-            max_samples = pivoted_times['Tempos'].str.len().max()
+            max_samples = 0
+            if not pivoted_times.empty:
+                max_samples_val = pivoted_times['Tempos'].str.len().max()
+                if pd.notna(max_samples_val):
+                    max_samples = int(max_samples_val)
+
             sample_cols = [f'Amostra {i+1}' for i in range(max_samples)]
             
             time_df = pd.DataFrame(pivoted_times['Tempos'].tolist(), index=pivoted_times.index, columns=sample_cols)
             
             # Juntar as informações com os tempos expandidos
             part1_df = pd.concat([pivoted_times[['Processos', 'Atividade']], time_df], axis=1)
+            
+            # --- INÍCIO DA LÓGICA MODIFICADA ---
+            # Garantir que todas as atividades definidas nos grupos, mesmo sem dados de tempo,
+            # apareçam na exportação com campos de amostra vazios.
+            all_grouped_activities = {act for data in self.activity_groups.values() for act in data['activities']}
+            
+            exported_activities = set()
+            if not part1_df.empty:
+                exported_activities = set(part1_df['Atividade'])
+
+            missing_activities = all_grouped_activities - exported_activities
+            
+            if missing_activities:
+                missing_data = []
+                for activity in sorted(list(missing_activities)):
+                    group_name = activity_to_group.get(activity, '')
+                    # Adiciona uma linha com o nome do processo e da atividade, o resto ficará em branco
+                    row = {'Processos': group_name, 'Atividade': activity}
+                    missing_data.append(row)
+                
+                if missing_data:
+                    missing_df = pd.DataFrame(missing_data)
+                    # Concatena as atividades faltantes. O Pandas preencherá as colunas de amostra com NaN (vazio).
+                    part1_df = pd.concat([part1_df, missing_df], ignore_index=True)
+            
+            # Ordenar para manter os grupos juntos e as atividades em ordem alfabética
+            if not part1_df.empty:
+                 part1_df = part1_df.sort_values(by=['Processos', 'Atividade']).reset_index(drop=True)
+            # --- FIM DA LÓGICA MODIFICADA ---
+
             part1_df.insert(1, 'COD', '') # Adicionar coluna COD em branco
             part1_df.rename(columns={'Atividade': 'Atividades da Coleta'}, inplace=True)
 
