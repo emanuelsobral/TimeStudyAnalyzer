@@ -502,9 +502,9 @@ class TimeStudyAnalyzer:
             
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao ler colunas: {str(e)}")
-            
+
     def process_data(self):
-        """Processar dados dos arquivos"""
+        """Processar dados dos arquivos, garantindo que células vazias sejam ignoradas."""
         if not self.uploaded_files:
             messagebox.showwarning("Aviso", "Nenhum arquivo selecionado")
             return
@@ -518,13 +518,15 @@ class TimeStudyAnalyzer:
             total_rows_read = 0
             files_processed = 0
             
+            activity_col = self.activity_combo.get()
+            time_col = self.time_combo.get()
+            
             for file_path in self.uploaded_files:
                 try:
                     # Ler arquivo
                     if file_path.endswith('.xlsx'):
                         df = pd.read_excel(file_path)
                     else:
-                        # Tentar diferentes encodings para CSV
                         try:
                             df = pd.read_csv(file_path, encoding='utf-8')
                         except UnicodeDecodeError:
@@ -533,142 +535,91 @@ class TimeStudyAnalyzer:
                             except UnicodeDecodeError:
                                 df = pd.read_csv(file_path, encoding='cp1252')
                     
-                    print(f"Arquivo {os.path.basename(file_path)}: {len(df)} linhas lidas")
                     total_rows_read += len(df)
                     
-                    # Extrair colunas selecionadas
-                    activity_col = self.activity_combo.get()
-                    time_col = self.time_combo.get()
-                    
                     if activity_col in df.columns and time_col in df.columns:
-                        # Criar cópia dos dados
+                        # 1. Selecionar apenas as colunas de interesse
                         data = df[[activity_col, time_col]].copy()
                         data.columns = ['Atividade', 'Tempo']
                         
-                        # Limpar espaços em branco nas atividades
+                        # --- INÍCIO DA LÓGICA DE LIMPEZA ---
+                        # 2. Remover qualquer linha onde a Atividade ou o Tempo sejam nulos (célula vazia)
+                        #    Isso garante que linhas com informações incompletas sejam descartadas.
+                        data.dropna(subset=['Atividade', 'Tempo'], how='any', inplace=True)
+
+                        # 3. Padronizar a coluna de atividade como texto e remover espaços
                         data['Atividade'] = data['Atividade'].astype(str).str.strip()
-                        
-                        # Filtrar linhas vazias ou nulas
-                        data = data[data['Atividade'].notna()]
+
+                        # 4. Remover linhas que, após a conversão, resultaram em strings vazias
                         data = data[data['Atividade'] != '']
-                        data = data[data['Atividade'] != 'nan']
+                        # --- FIM DA LÓGICA DE LIMPEZA ---
                         
-                        print(f"Arquivo {os.path.basename(file_path)}: {len(data)} linhas válidas após limpeza")
-                        
-                        if len(data) > 0:
+                        if not data.empty:
                             all_data.append(data)
                             files_processed += 1
                     else:
                         print(f"Colunas não encontradas no arquivo {os.path.basename(file_path)}")
-                        print(f"Colunas disponíveis: {list(df.columns)}")
-                        
+
                 except Exception as e:
                     print(f"Erro ao processar arquivo {os.path.basename(file_path)}: {str(e)}")
                     continue
-                    
-            print(f"Total de arquivos processados: {files_processed}")
-            print(f"Total de linhas lidas: {total_rows_read}")
             
-            if all_data:
-                # Concatenar todos os dados
-                self.processed_data = pd.concat(all_data, ignore_index=True)
-                print(f"Dados concatenados: {len(self.processed_data)} linhas")
+            if not all_data:
+                messagebox.showerror("Erro", "Nenhum dado válido pôde ser extraído dos arquivos. Verifique se as colunas selecionadas estão corretas e contêm dados.")
+                return
+
+            # Concatenar todos os dados limpos
+            self.processed_data = pd.concat(all_data, ignore_index=True)
+            original_count = len(self.processed_data)
+            
+            # Função para converter a coluna de tempo para segundos
+            def convert_time(time_val):
+                if pd.isna(time_val): return None
+                if isinstance(time_val, (int, float)): return float(time_val)
                 
-                # Converter tempo para numérico
-                original_count = len(self.processed_data)
-                
-                # Tentar converter tempo - aceitar diferentes formatos
-                def convert_time(time_val):
-                    if pd.isna(time_val):
-                        return None
-                    
-                    # Se já é numérico
-                    if isinstance(time_val, (int, float)):
-                        return float(time_val)
-                    
-                    # Se é string, tentar converter
-                    time_str = str(time_val).strip()
-                    
-                    # Verificar se é formato de tempo (HH:MM:SS, MM:SS, etc.)
-                    if ':' in time_str:
-                        try:
-                            # Dividir por ':'
-                            parts = time_str.split(':')
-                            total_seconds = 0
-                            
-                            if len(parts) == 3:  # HH:MM:SS
-                                hours = float(parts[0])
-                                minutes = float(parts[1])
-                                seconds = float(parts[2])
-                                total_seconds = hours * 3600 + minutes * 60 + seconds
-                            elif len(parts) == 2:  # MM:SS
-                                minutes = float(parts[0])
-                                seconds = float(parts[1])
-                                total_seconds = minutes * 60 + seconds
-                            else:
-                                return None
-                                
-                            return total_seconds
-                            
-                        except (ValueError, IndexError):
-                            # Se falhar, tentar outros métodos
-                            pass
-                    
-                    # Remover caracteres não numéricos comuns
-                    time_str = time_str.replace(',', '.')  # Vírgula para ponto decimal
-                    time_str = time_str.replace(' ', '')   # Remover espaços
-                    
-                    # Tentar converter para float
+                time_str = str(time_val).strip()
+                if ':' in time_str:
                     try:
-                        return float(time_str)
-                    except ValueError:
+                        parts = time_str.split(':')
+                        total_seconds = 0
+                        if len(parts) == 3: # HH:MM:SS
+                            total_seconds = float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+                        elif len(parts) == 2: # MM:SS
+                            total_seconds = float(parts[0])*60 + float(parts[1])
+                        return total_seconds
+                    except (ValueError, IndexError):
                         return None
-                
-                self.processed_data['Tempo'] = self.processed_data['Tempo'].apply(convert_time)
-                
-                # Remover linhas com tempo inválido
-                self.processed_data = self.processed_data.dropna(subset=['Tempo'])
-                
-                # Remover tempos negativos ou zero
-                self.processed_data = self.processed_data[self.processed_data['Tempo'] > 0]
-                
-                final_count = len(self.processed_data)
-                print(f"Dados finais após validação: {final_count} linhas")
-                print(f"Linhas removidas por dados inválidos: {original_count - final_count}")
-                
-                if final_count > 0:
-                    self.update_processed_preview()
-                    self.update_available_activities()
-                    messagebox.showinfo("Sucesso", 
-                        f"Dados processados com sucesso!\n"
-                        f"• {files_processed} arquivo(s) processado(s)\n"
-                        f"• {total_rows_read} linha(s) lida(s)\n"
-                        f"• {final_count} registro(s) válido(s)\n"
-                        f"• {original_count - final_count} registro(s) removido(s) por dados inválidos")
-                else:
-                    messagebox.showerror("Erro", 
-                        f"Nenhum dado válido encontrado!\n"
-                        f"• {files_processed} arquivo(s) processado(s)\n"
-                        f"• {total_rows_read} linha(s) lida(s)\n"
-                        f"• Todos os registros foram removidos por conterem dados inválidos\n\n"
-                        f"Verifique se:\n"
-                        f"• A coluna de tempo contém valores numéricos\n"
-                        f"• A coluna de atividade não está vazia\n"
-                        f"• Os dados não contêm apenas cabeçalhos")
+                try:
+                    return float(time_str.replace(',', '.'))
+                except ValueError:
+                    return None
+
+            # Aplicar conversão de tempo e remover falhas
+            self.processed_data['Tempo'] = self.processed_data['Tempo'].apply(convert_time)
+            self.processed_data.dropna(subset=['Tempo'], inplace=True)
+            
+            # Remover tempos negativos ou zero
+            self.processed_data = self.processed_data[self.processed_data['Tempo'] > 0]
+            
+            final_count = len(self.processed_data)
+            removed_count = original_count - final_count
+
+            if final_count > 0:
+                self.update_processed_preview()
+                self.update_available_activities()
+                messagebox.showinfo("Sucesso", 
+                    f"Dados processados com sucesso!\n\n"
+                    f"• {files_processed} arquivo(s) processado(s).\n"
+                    f"• {total_rows_read} linha(s) lida(s) no total.\n"
+                    f"• {final_count} registro(s) válido(s) para análise.\n"
+                    f"• {removed_count} registro(s) removido(s) por tempo inválido.")
             else:
-                messagebox.showerror("Erro", 
-                    f"Nenhum arquivo pôde ser processado!\n"
-                    f"• {len(self.uploaded_files)} arquivo(s) selecionado(s)\n"
-                    f"• 0 arquivo(s) processado(s)\n\n"
-                    f"Verifique se:\n"
-                    f"• Os arquivos não estão corrompidos\n"
-                    f"• As colunas selecionadas existem nos arquivos\n"
-                    f"• Os arquivos contêm dados válidos")
-                
+                 messagebox.showerror("Erro", "Nenhum dado válido encontrado após a limpeza e conversão. Verifique o formato dos dados nas colunas de tempo.")
+
         except Exception as e:
             messagebox.showerror("Erro", f"Erro geral ao processar dados: {str(e)}")
             print(f"Erro detalhado: {str(e)}")
-            
+
     def update_processed_preview(self):
         """Atualizar preview dos dados processados"""
         for item in self.processed_tree.get_children():
@@ -1064,7 +1015,7 @@ class TimeStudyAnalyzer:
                 # Se não houver grupos, as atividades são listadas na raiz.
                 parent_item = ""
                 if self.activity_groups:
-                     parent_item = self.results_tree.insert("", tk.END, text="📋 Atividades Não Agrupadas", open=True)
+                        parent_item = self.results_tree.insert("", tk.END, text="📋 Atividades Não Agrupadas", open=True)
 
                 for activity, times in ungrouped_df.groupby('Atividade')['Tempo']:
                     metrics = self._calculate_metrics(times)
